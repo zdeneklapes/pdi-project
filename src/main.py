@@ -211,7 +211,7 @@ async def get_data_source(program: Program, settings: dict) -> Tuple[StreamExecu
     return env, data_source
 
 
-def print_all_data_formatted(record: Row):
+def format_preprocessed_data(record: Row):
     """
     Print the formatted data.
     """
@@ -366,41 +366,10 @@ async def task_1(data_source: DataStream, program: Program) -> DataStream:
                 bounding_box[BoundingBox.LAT_MIN.value] <= lat <= bounding_box[BoundingBox.LAT_MAX.value]
                 and bounding_box[BoundingBox.LNG_MIN.value] <= lon <= bounding_box[BoundingBox.LNG_MAX.value]
         )
-        # if in_box:
-        #     logger.debug(f"Vehicle within bounding box: {vehicle}")
         return in_box
-
-    # def format_vehicle(vehicle):
-    #     """
-    #     Format vehicle data for printing or saving.
-    #     """
-    #     attributes = vehicle.get("attributes", {})
-    #     return {
-    #         "id": attributes.get("id", ""),
-    #         "vtype": attributes.get("vtype", ""),
-    #         "line": attributes.get("linename", ""),
-    #         "route": attributes.get("routeid", ""),
-    #         "latitude": vehicle.get("geometry", {}).get("y", ""),
-    #         "longitude": vehicle.get("geometry", {}).get("x", ""),
-    #     }
 
     # Filter vehicles within the bounding box
     filtered_data = data_source.filter(is_within_bounding_box)
-
-    # Format and print the results
-    # def print_formatted_vehicle(record):
-    #     formatted = (
-    #         f"ID: {record['id']:<10} | "
-    #         f"Type: {record['vtype']:<5} | "
-    #         f"Line: {record['line']:<10} | "
-    #         f"Route: {record['route']:<10} | "
-    #         f"Latitude: {record['latitude']:<10} | "
-    #         f"Longitude: {record['longitude']:<10}"
-    #     )
-    #     print(formatted)
-
-    # formatted_data = filtered_data.map(format_vehicle)
-    # formatted_data.add_sink(lambda x: print_formatted_vehicle(x))
 
     # Key vehicles by ID for possible downstream operations
     class KeyById(KeySelector):
@@ -430,7 +399,7 @@ async def task_1(data_source: DataStream, program: Program) -> DataStream:
     data_source.sink_to(sink)
 
     formatted_data = data_source.map(
-        print_all_data_formatted,
+        format_preprocessed_data,
         output_type=Types.STRING()
     )
     formatted_data.print()
@@ -485,7 +454,7 @@ async def task_2(data_source: DataStream, program: Program) -> DataStream:
     ).with_output_file_config(
         OutputFileConfig.builder()
         .with_part_prefix("task2")
-        .with_part_suffix(".csv")
+        .with_part_suffix(".txt")
         .build()
     ).with_rolling_policy(
         RollingPolicy.default_rolling_policy()
@@ -623,40 +592,6 @@ class WebStreamStore:
         file_name = self._get_file_name()
         async with aiofile.async_open(file_name, "w") as f:
             await f.write(message)
-
-    # async def receive_and_save(self):
-    #     while True:
-    #         message = await self.websocket.recv()
-    #         await self.save_to_file(message)
-
-    # def is_file_processed(self):
-    #     try:
-    #         return self.file_processed
-    #     except AttributeError:
-    #         self.file_processed = False
-    #         return self.file_processed
-
-    # async def get_messages(self) -> list:
-    #     """ Retrieve all messages and clear the store. """
-    #     _all = []
-    #     if self.program.args["process_data_file"]:
-    #         if self.is_file_processed():
-    #             raise Exception("File already processed.")
-    #         self.file_processed = True
-    #         # Open the file and read JSON records
-    #         async with aiofile.async_open(self.program.args["process_data_file"], "r") as file:
-    #             record = None
-    #             async for line in file:
-    #                 try:
-    #                     record = record + line if record else line
-    #                 except json.JSONDecodeError as e:
-    #                     logger.warning(f"Failed to parse JSON record: {line}. Error: {e}")
-    #         return _all
-    #     else:
-    #         while not self.messages.empty():
-    #             _all.append(json.loads(await self.messages.get()))
-    #         return _all
-
 
 def parseArgs() -> dict:
     args = ArgumentParser()
