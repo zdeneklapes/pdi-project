@@ -8,3 +8,9 @@ services:
       - .:/opt/app:Z
       - ./tmp/fish/:/root/.local/share/fish/ # Remain fish shell history. This will create ./data/fish/ folder in the project directory if it doesn't exist already
     tty: true
+    deploy:
+      resources:
+        limits:
+          memory: 5g
+        reservations:
+          memory: 5g

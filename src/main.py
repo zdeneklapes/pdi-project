@@ -1,17 +1,17 @@
 import asyncio
 import json
 import os
+import sys
 from argparse import ArgumentParser
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from pprint import pformat
 from typing import Tuple
 
 import aiofile
-from pyflink.common import Row
 from pyflink.common import Duration, Encoder
+from pyflink.common import Row
 from pyflink.common import Types
 from pyflink.common import WatermarkStrategy
 from pyflink.datastream import (
@@ -145,13 +145,14 @@ logger = Logger()
 async def get_data_source(program: Program, settings: dict) -> Tuple[StreamExecutionEnvironment, DataStream]:
     """
     Get the Flink environment.
-    :param message_store:
     :param program:
     :param settings:
     :return:
     """
     env = StreamExecutionEnvironment.get_execution_environment()
-    env.set_parallelism(1)
+    cpus = os.cpu_count() // 2 or 1
+    logger.info(f"Setting parallelism to {cpus}")
+    env.set_parallelism(cpus)
     # start a checkpoint every 1000 ms
     env.enable_checkpointing(1000)
     # set mode to exactly-once (this is the default)
@@ -171,6 +172,8 @@ async def get_data_source(program: Program, settings: dict) -> Tuple[StreamExecu
     # enables the unaligned checkpoints
     env.get_checkpoint_config().enable_unaligned_checkpoints()
 
+    env.set_buffer_timeout(20000)  # Set buffer timeout to 20 seconds
+
     # set the checkpoint storage to file system
     checkpoint_dir = ROOT_DIR / "tmp/checkpoints"
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -180,27 +183,59 @@ async def get_data_source(program: Program, settings: dict) -> Tuple[StreamExecu
     # table_env = StreamTableEnvironment.create(stream_execution_environment=stream_env, environment_settings=settings)
 
     # mode: BULK, BATCH
-    logger.debug(f"Processing mode: {program.args['mode']}, directory: {program.args['data_dir']}")
+    logger.debug(f"Output directory: {program.args['data_dir']}")
     if program.args["mode"] == "batch":
+        logger.debug("Processing data in BATCH mode.")
         data_source = env.from_source(
             source=FileSource.for_record_stream_format(StreamFormat.text_line_format(), program.args["data_dir"].as_posix())
             .process_static_file_set()
             .build(),
-            watermark_strategy=WatermarkStrategy.for_monotonous_timestamps(),
+            # watermark_strategy=WatermarkStrategy.for_monotonous_timestamps(),
+            watermark_strategy=WatermarkStrategy.for_monotonous_timestamps().with_idleness(Duration.of_seconds(30)),
             source_name="FileSource",
         )
     elif program.args["mode"] == "stream":
+        logger.debug("Processing data in STREAM mode.")
         data_source = env.from_source(
             source=FileSource.for_record_stream_format(StreamFormat.text_line_format(), program.args["data_dir"].as_posix())
-            .monitor_continuously(Duration.of_seconds(4))
+            .monitor_continuously(Duration.of_seconds(11))
             .build(),
-            watermark_strategy=WatermarkStrategy.for_monotonous_timestamps(),
+            # watermark_strategy=WatermarkStrategy.for_monotonous_timestamps(),
+            watermark_strategy=WatermarkStrategy.for_monotonous_timestamps().with_idleness(Duration.of_seconds(30)),
             source_name="FileSource",
         )
     else:
+        env.close()
         assert False, f"Invalid mode: {program.args['mode']}"
 
     return env, data_source
+
+
+def print_all_data_formatted(record: Row):
+    """
+    Print the formatted data.
+    """
+    row = record.as_dict()
+    str_stdout = (
+        f"id: {row['id']:>6} | "
+        f"vtype: {row['vtype']:>2} | "
+        f"ltype: {row['ltype']:>2} | "
+        f"lat: {row['lat']:>2.4f} | "
+        f"lng: {row['lng']:>2.4f} | "
+        f"bearing: {row['bearing']:>5.1f} | "
+        f"lineid: {row['lineid']:>4} | "
+        # f"linename: {row['linename']:>2} | "
+        f"routeid: {row['routeid']:>5} | "
+        # f"course: {row['course']:>2} | "
+        # f"lf: {row['lf']:>2} | "
+        # f"delay: {row['delay']:>4.1f} | "
+        # f"laststopid: {row['laststopid']:>5} | "
+        # f"finalstopid: {row['finalstopid']:>5} | "
+        # f"isinactive: {row['isinactive']:>5} | "
+        f"lastupdate: {row['lastupdate']:>15} | "
+        # f"globalid: {row['globalid']:>5}"
+    )
+    return str_stdout
 
 
 async def preprocess_data(data_source: DataStream, program: Program) -> DataStream:
@@ -221,33 +256,64 @@ async def preprocess_data(data_source: DataStream, program: Program) -> DataStre
 
     def dict_to_row(record):
         """
-        Convert dictionary to Flink Row object for proper processing.
+        Convert dictionary to a flat Flink Row object for proper processing.
+        Includes flattening geometry and attributes into top-level fields.
         """
-        return Row(record.get("geometry"), record.get("attributes"))
+        geometry = record.get("geometry", {})
+        attributes = record.get("attributes", {})
 
+        return Row(
+            id=attributes.get("id"),
+            vtype=attributes.get("vtype"),
+            ltype=attributes.get("ltype"),
+            lat=geometry.get("y"),
+            lng=geometry.get("x"),
+            bearing=attributes.get("bearing"),
+            lineid=attributes.get("lineid"),
+            linename=attributes.get("linename"),
+            routeid=attributes.get("routeid"),
+            course=attributes.get("course"),
+            lf=attributes.get("lf"),
+            delay=attributes.get("delay"),
+            laststopid=attributes.get("laststopid"),
+            finalstopid=attributes.get("finalstopid"),
+            isinactive=attributes.get("isinactive"),
+            lastupdate=attributes.get("lastupdate"),
+            globalid=attributes.get("globalid"),
+        )
 
     # Convert JSON records to Python dictionaries
     data_source = data_source.map(
         json_to_dict, output_type=Types.MAP(Types.STRING(), Types.STRING())
     ).filter(lambda record: record is not None)
 
-    # data_source = data_source.map(
-    #     dict_to_row,
-    #     output_type=Types.ROW_NAMED(
-    #         ["geometry", "attributes"],
-    #         [Types.MAP(Types.STRING(), Types.FLOAT()), Types.MAP(Types.STRING(), Types.STRING())]
-    #     )
-    # )
+    # Flatten and structure records into Rows
+    data_source = data_source.map(
+        dict_to_row,
+        output_type=Types.ROW_NAMED(
+            [
+                "id", "vtype", "ltype", "lat", "lng", "bearing", "lineid", "linename",
+                "routeid", "course", "lf", "delay", "laststopid", "finalstopid",
+                "isinactive", "lastupdate", "globalid"
+            ],
+            [
+                Types.STRING(), Types.INT(), Types.INT(), Types.FLOAT(), Types.FLOAT(),
+                Types.FLOAT(), Types.INT(), Types.STRING(), Types.INT(), Types.STRING(),
+                Types.STRING(), Types.FLOAT(), Types.INT(), Types.INT(),
+                Types.STRING(), Types.LONG(), Types.STRING()
+            ]
+        )
+    )
 
     # Filter out inactive vehicles (isinactive = "false")
     data_source = data_source.filter(
-        lambda record: record.get("attributes", {}).get("isinactive", None) == "false"
+        lambda record: record.isinactive == "false"
     )
 
     # Step 3: Key the stream by `id` (or another unique attribute) for further processing
     class KeyById(KeySelector):
         def get_key(self, value):
-            return str(value.get("attributes", {}).get("id", None))
+            return value.id
 
     data_source = data_source.key_by(KeyById())
 
@@ -261,7 +327,7 @@ async def preprocess_data(data_source: DataStream, program: Program) -> DataStre
     ).with_output_file_config(
         OutputFileConfig.builder()
         .with_part_prefix("preprocessed")
-        .with_part_suffix(".json")
+        .with_part_suffix(".txt")
         .build()
     ).with_rolling_policy(
         RollingPolicy.default_rolling_policy()
@@ -270,6 +336,12 @@ async def preprocess_data(data_source: DataStream, program: Program) -> DataStre
     # Sink preprocessed data
     data_source.sink_to(sink)
 
+    # formatted_data = data_source.map(
+    #     print_all_data_formatted,
+    #     output_type=Types.STRING()
+    # )
+    # formatted_data.print()
+
     logger.debug("Preprocessing completed and data has been written to the sink.")
 
     return data_source
@@ -277,71 +349,161 @@ async def preprocess_data(data_source: DataStream, program: Program) -> DataStre
 
 async def task_1(data_source: DataStream, program: Program) -> DataStream:
     """
-    Task 1: Print vehicles in a specified area.
+    Task 1: Print vehicles in the specified bounding box and save the results.
     """
     logger.debug("Task 1: Filtering vehicles in the specified bounding box.")
     bounding_box = program.args["bounding_box"]
 
-    def filter_out_inactive_vehicles(vehicle):
+    def is_within_bounding_box(vehicle: Row):
         """
-        Helper function to filter out inactive vehicles.
+        Check if a vehicle is within the bounding box.
         """
-        formatted = pformat(vehicle)
-        logger.debug(f"Vehicle in bounding box: \n{formatted}")
-        isinactive = vehicle["attributes"]["isinactive"]
-        assert isinactive is not None, f"Invalid vehicle attributes: {isinactive}"
-        if isinstance(isinactive, str):
-            isinactive = isinactive.lower()
-            assert isinactive in ["true", "false"], f"Invalid vehicle attributes: {isinactive}"
-        if isinactive == "true":
-            isinactive = True
-        elif isinactive == "false":
-            isinactive = False
-        else:
-            assert False, f"Invalid vehicle attributes: {isinactive}"
-        return isinactive == False
-
-    def filter_out_of_bounding_box(vehicle: dict):
-        """
-        Helper function to filter and log vehicles.
-        """
-        _x = vehicle.get("geometry", {}).get("x", None)
-        _y = vehicle.get("geometry", {}).get("y", None)
-        assert _x is not None and _y is not None, f"Invalid vehicle geometry: {_x}, {_y}"
-        in_bounding_box = (
-                bounding_box[BoundingBox.LAT_MIN] <= _y <= bounding_box[BoundingBox.LAT_MAX]
-                and bounding_box[BoundingBox.LNG_MIN] <= _x <= bounding_box[BoundingBox.LNG_MAX]
+        row = vehicle.as_dict()
+        lat = row.get("lat", None)
+        lon = row.get("lng", None)
+        assert lat is not None and lon is not None, f"Invalid vehicle geometry: {vehicle}"
+        in_box = (
+                bounding_box[BoundingBox.LAT_MIN.value] <= lat <= bounding_box[BoundingBox.LAT_MAX.value]
+                and bounding_box[BoundingBox.LNG_MIN.value] <= lon <= bounding_box[BoundingBox.LNG_MAX.value]
         )
-        logger.debug(f"Vehicle in bounding box: {in_bounding_box}")
-        return in_bounding_box
+        # if in_box:
+        #     logger.debug(f"Vehicle within bounding box: {vehicle}")
+        return in_box
 
-    filtered_data = (data_source
-                     .filter(lambda vehicle: filter_out_inactive_vehicles(vehicle))
-                     .filter(lambda vehicle: filter_out_of_bounding_box(vehicle))
-                     )
-    filtered_data.print()
-    return filtered_data
+    # def format_vehicle(vehicle):
+    #     """
+    #     Format vehicle data for printing or saving.
+    #     """
+    #     attributes = vehicle.get("attributes", {})
+    #     return {
+    #         "id": attributes.get("id", ""),
+    #         "vtype": attributes.get("vtype", ""),
+    #         "line": attributes.get("linename", ""),
+    #         "route": attributes.get("routeid", ""),
+    #         "latitude": vehicle.get("geometry", {}).get("y", ""),
+    #         "longitude": vehicle.get("geometry", {}).get("x", ""),
+    #     }
+
+    # Filter vehicles within the bounding box
+    filtered_data = data_source.filter(is_within_bounding_box)
+
+    # Format and print the results
+    # def print_formatted_vehicle(record):
+    #     formatted = (
+    #         f"ID: {record['id']:<10} | "
+    #         f"Type: {record['vtype']:<5} | "
+    #         f"Line: {record['line']:<10} | "
+    #         f"Route: {record['route']:<10} | "
+    #         f"Latitude: {record['latitude']:<10} | "
+    #         f"Longitude: {record['longitude']:<10}"
+    #     )
+    #     print(formatted)
+
+    # formatted_data = filtered_data.map(format_vehicle)
+    # formatted_data.add_sink(lambda x: print_formatted_vehicle(x))
+
+    # Key vehicles by ID for possible downstream operations
+    class KeyById(KeySelector):
+        def get_key(self, value: Row):
+            row = value.as_dict()
+            return row.get("id")
+
+    keyed_data = filtered_data.key_by(KeyById())
+
+    # Define a sink to save the filtered results to a CSV file
+    sink_dir = program.args["output_dir"] / "filtered_vehicles"
+    sink_dir.mkdir(parents=True, exist_ok=True)
+
+    sink = FileSink.for_row_format(
+        base_path=str(sink_dir),
+        encoder=Encoder.simple_string_encoder()
+    ).with_output_file_config(
+        OutputFileConfig.builder()
+        .with_part_prefix("task1")
+        .with_part_suffix(".txt")
+        .build()
+    ).with_rolling_policy(
+        RollingPolicy.default_rolling_policy()
+    ).build()
+
+    # Sink preprocessed data
+    data_source.sink_to(sink)
+
+    formatted_data = data_source.map(
+        print_all_data_formatted,
+        output_type=Types.STRING()
+    )
+    formatted_data.print()
+
+    logger.debug("Task 1 completed. Results printed and saved.")
+    return keyed_data
 
 
-# async def task_2(data_source: DataStream, program: Program) -> DataStream:
-#     """
-#     Task 2: List trolleybuses at their final stop.
-#     """
-#     logger.debug("Task 2: Filtering trolleybuses at their final stop.")
-#     trolleybuses_at_final_stop = data_source.filter(
-#         lambda vehicle: vehicle[PublicTransitKey.ltype] == 2  # Assuming ltype 2 indicates trolleybus
-#                         and vehicle[PublicTransitKey.laststopid] == vehicle[PublicTransitKey.finalstopid]
-#     ).map(
-#         lambda vehicle: {
-#             "id": vehicle[PublicTransitKey.id],
-#             "stop": vehicle[PublicTransitKey.laststopid],
-#             "timestamp": vehicle[PublicTransitKey.lastupdate],
-#         }
-#     )
-#     trolleybuses_at_final_stop.print()
-#     return trolleybuses_at_final_stop
-#
-#
+async def task_2(data_source: DataStream, program: Program) -> DataStream:
+    """
+    Task 2: List trolleybuses at their final stop, with stop ID and time of arrival.
+    """
+    logger.debug("Task 2: Filtering trolleybuses that have reached their final stop.")
+
+    def is_trolleybus_at_final_stop(vehicle: Row):
+        """
+        Check if a trolleybus has reached its final stop.
+        """
+        row = vehicle.as_dict()
+        vtype = row.get("vtype", None)  # Assuming vtype indicates the vehicle type
+        last_stop = row.get("laststopid", None)
+        final_stop = row.get("finalstopid", None)
+
+        # Ensure the required fields are present
+        assert vtype is not None and last_stop is not None and final_stop is not None, \
+            f"Invalid vehicle data: {row}"
+
+        # Check if the vehicle is a trolleybus and has reached its final stop
+        return vtype == 2 and last_stop == final_stop  # Assuming vtype 2 indicates a trolleybus
+
+    def format_trolleybus_data(vehicle: Row):
+        """
+        Format trolleybus data for logging or saving.
+        """
+        row = vehicle.as_dict()
+        return (
+            f"id: {row.get('id'):>6} | "
+            f"laststopid: {row.get('laststopid'):>5} | "
+            f"finalstopid: {row.get('finalstopid'):>5} | "
+        )
+
+    # Filter trolleybuses that have reached their final stop
+    data_source = data_source.filter(is_trolleybus_at_final_stop)
+
+    # Sink the data to a CSV file for logging
+    sink_dir = program.args["output_dir"] / "trolleybuses_final_stop"
+    sink_dir.mkdir(parents=True, exist_ok=True)
+
+    sink = FileSink.for_row_format(
+        base_path=str(sink_dir),
+        encoder=Encoder.simple_string_encoder()
+    ).with_output_file_config(
+        OutputFileConfig.builder()
+        .with_part_prefix("task2")
+        .with_part_suffix(".csv")
+        .build()
+    ).with_rolling_policy(
+        RollingPolicy.default_rolling_policy()
+    ).build()
+
+    data_source.sink_to(sink)
+
+    # Format the data for better readability
+    formatted_data = data_source.map(
+        format_trolleybus_data,
+        output_type=Types.STRING()
+    )
+    formatted_data.print()
+
+    logger.debug("Task 2 completed. Results printed and saved.")
+    return data_source
+
+
 # async def task_3(data_source: DataStream, program: Program) -> DataStream:
 #     """
 #     Task 3: List delayed vehicles reducing delay, sorted by improvement.
@@ -396,7 +558,7 @@ async def process_tasks(program: Program):
     """
     TASKS = {
         1: task_1,
-        # 2: task_2,
+        2: task_2,
         # 3: task_3,
         # 4: task_4,
         # 5: task_5,
@@ -409,17 +571,17 @@ async def process_tasks(program: Program):
     # Preprocess the data
     data_source = await preprocess_data(data_source, program)
 
-    # if 0 in program.args["task"]:
-    #     # Execute all tasks if task 0 is specified
-    #     logger.debug("Task 0: Executing all tasks.")
-    #     for task_number, task_function in TASKS.items():
-    #         logger.debug(f"Executing Task {task_number}.")
-    #         data_source = await task_function(data_source, program)
-    # else:
-    #     # Execute the specified task
-    #     for task_number in program.args["task"]:
-    #         logger.debug(f"Executing Task {program.args['task']}.")
-    #         data_source = await TASKS[task_number](data_source, program)
+    if 0 in program.args["task"]:
+        # Execute all tasks if task 0 is specified
+        logger.debug("Task 0: Executing all tasks.")
+        for task_number, task_function in TASKS.items():
+            logger.debug(f"Executing Task {task_number}.")
+            data_source = await task_function(data_source, program)
+    else:
+        # Execute the specified task
+        for task_number in program.args["task"]:
+            logger.debug(f"Executing Task {program.args['task']}.")
+            data_source = await TASKS[task_number](data_source, program)
 
     # Execute the Flink job
     logger.debug("Task processing started.")
@@ -581,7 +743,7 @@ def parseArgs() -> dict:
 
 async def main():
     program = Program(parseArgs())
-    logger.debug(f"python3 ./src/main.py --bounding-box " + " ".join(map(str, program.args.get("bounding_box"))))
+    logger.debug(f"python3 ./{sys.argv[0]} {' '.join(sys.argv[1:])}")
     logger.debug(f"Program arguments: {program.args}")
     async with WebStreamStore(program) as store:
         if program.args["mode"] == "download":
