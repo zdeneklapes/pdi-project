@@ -1,32 +1,31 @@
 import asyncio
+import json
 import os
 from argparse import ArgumentParser
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum, StrEnum
+from enum import Enum
 from pathlib import Path
+from pprint import pformat
 from typing import Tuple
 
 import aiofile
-from pyflink.common import Duration
-from pyflink.common import Types, WatermarkStrategy
-from pyflink.common.time import Time
-from pyflink.common.watermark_strategy import TimestampAssigner
-from pyflink.datastream import StreamExecutionEnvironment, CheckpointingMode, ExternalizedCheckpointRetention, FileSystemCheckpointStorage, DataStream, KeyedProcessFunction, FlatMapFunction
-from pyflink.datastream.functions import AggregateFunction
-from pyflink.datastream.state import ValueStateDescriptor
-from pyflink.datastream.window import SlidingProcessingTimeWindows
+from pyflink.common import Row
+from pyflink.common import Duration, Encoder
+from pyflink.common import Types
+from pyflink.common import WatermarkStrategy
+from pyflink.datastream import (
+    StreamExecutionEnvironment,
+    CheckpointingMode,
+    FileSystemCheckpointStorage,
+    DataStream,
+)
+from pyflink.datastream.connectors.file_system import FileSink, OutputFileConfig, RollingPolicy
+from pyflink.datastream.connectors.file_system import FileSource, StreamFormat
+from pyflink.datastream.functions import KeySelector
 from websockets import connect
 
-ENVIRONMENT = {
-    "PRINT": [
-        "DEBUG",
-        "INFO",
-        "WARNING",
-        "ERROR",
-        "CRITICAL"
-    ]
-}
+ENVIRONMENT = {"PRINT": ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]}
 DEBUG = True if "DEBUG" in ENVIRONMENT["PRINT"] else False
 
 ROOT_DIR = Path(__file__).parent.parent
@@ -55,7 +54,7 @@ class Logger:
         return cls.instance
 
     def _get_time(self):
-        return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     def debug(self, message):
         if "DEBUG" in ENVIRONMENT["PRINT"]:
@@ -73,109 +72,77 @@ class Logger:
         if not condition:
             assert False, message
 
+    def overwrite(self, message):
+        print(f"\r{message}", end="")
+
 
 logger = Logger()
 
 
-class ReduceDelayProcessFunction(KeyedProcessFunction):
-    def process_element(self, vehicle, ctx: "KeyedProcessFunction.Context", out):
-        prev_delay = self.get_runtime_context().get_state(ValueStateDescriptor("prev_delay", Types.DOUBLE()))
-        curr_delay = vehicle[PublicTransitKey.delay]
-        if prev_delay.value() is not None and curr_delay < prev_delay.value():
-            delay_diff = prev_delay.value() - curr_delay
-            out.collect((vehicle[PublicTransitKey.id], delay_diff))
-        prev_delay.update(curr_delay)
+# class ReduceDelayProcessFunction(KeyedProcessFunction):
+#     def process_element(self, vehicle, ctx: "KeyedProcessFunction.Context", out):
+#         prev_delay = self.get_runtime_context().get_state(ValueStateDescriptor("prev_delay", Types.DOUBLE()))
+#         curr_delay = vehicle[PublicTransitKey.delay]
+#         if prev_delay.value() is not None and curr_delay < prev_delay.value():
+#             delay_diff = prev_delay.value() - curr_delay
+#             out.collect((vehicle[PublicTransitKey.id], delay_diff))
+#         prev_delay.update(curr_delay)
+#
+#
+# class ComputeIntervalsFunction(FlatMapFunction):
+#     def __init__(self):
+#         self.timestamps = []
+#
+#     def flat_map(self, vehicle, out):
+#         self.timestamps.append(vehicle[PublicTransitKey.lastupdate])
+#         if len(self.timestamps) > 10:
+#             self.timestamps.pop(0)
+#         if len(self.timestamps) > 1:
+#             intervals = [self.timestamps[i] - self.timestamps[i - 1] for i in range(1, len(self.timestamps))]
+#             out.collect((min(intervals), max(intervals)))
+#
+#
+# class CustomTimestampAssigner(TimestampAssigner):
+#     def extract_timestamp(self, value, record_timestamp):
+#         return value["attributes"]["lastupdate"]
+#
+#
+# class MinMaxDelayAggregate(AggregateFunction):
+#     """
+#     Aggregate function to calculate the minimum and maximum delays.
+#     """
+#
+#     def create_accumulator(self):
+#         """
+#         Initializes the accumulator with default min and max values.
+#         """
+#         return float("inf"), float("-inf")  # (min_delay, max_delay)
+#
+#     def add(self, value, accumulator):
+#         """
+#         Updates the accumulator with a new delay value.
+#         :param value: The current vehicle data (expects delay field).
+#         :param accumulator: Tuple (min_delay, max_delay).
+#         """
+#         delay = value[PublicTransitKey.delay]
+#         min_delay, max_delay = accumulator
+#         return min(delay, min_delay), max(delay, max_delay)
+#
+#     def get_result(self, accumulator):
+#         """
+#         Returns the min and max delays from the accumulator.
+#         """
+#         return accumulator
+#
+#     def merge(self, acc1, acc2):
+#         """
+#         Merges two accumulators.
+#         """
+#         return min(acc1[0], acc2[0]), max(acc1[1], acc2[1])
+#
 
 
-class ComputeIntervalsFunction(FlatMapFunction):
-    def __init__(self):
-        self.timestamps = []
-
-    def flat_map(self, vehicle, out):
-        self.timestamps.append(vehicle[PublicTransitKey.lastupdate])
-        if len(self.timestamps) > 10:
-            self.timestamps.pop(0)
-        if len(self.timestamps) > 1:
-            intervals = [self.timestamps[i] - self.timestamps[i - 1] for i in range(1, len(self.timestamps))]
-            out.collect((min(intervals), max(intervals)))
-
-
-class CustomTimestampAssigner(TimestampAssigner):
-    def extract_timestamp(self, value, record_timestamp):
-        return value["attributes"]["lastupdate"]
-
-
-class MinMaxDelayAggregate(AggregateFunction):
-    """
-    Aggregate function to calculate the minimum and maximum delays.
-    """
-
-    def create_accumulator(self):
-        """
-        Initializes the accumulator with default min and max values.
-        """
-        return float("inf"), float("-inf")  # (min_delay, max_delay)
-
-    def add(self, value, accumulator):
-        """
-        Updates the accumulator with a new delay value.
-        :param value: The current vehicle data (expects delay field).
-        :param accumulator: Tuple (min_delay, max_delay).
-        """
-        delay = value[PublicTransitKey.delay]
-        min_delay, max_delay = accumulator
-        return min(delay, min_delay), max(delay, max_delay)
-
-    def get_result(self, accumulator):
-        """
-        Returns the min and max delays from the accumulator.
-        """
-        return accumulator
-
-    def merge(self, acc1, acc2):
-        """
-        Merges two accumulators.
-        """
-        return min(acc1[0], acc2[0]), max(acc1[1], acc2[1])
-
-
-class PublicTransitKey(StrEnum):
-    """Data class representing a single entry from the public transit stream."""
-
-    globalid = "globalid"
-    id = "id"
-    vtype = "vtype"
-    ltype = "ltype"
-    lat = "lat"
-    lng = "lng"
-    bearing = "bearing"
-    lineid = "lineid"
-    linename = "linename"
-    routeid = "routeid"
-    course = "course"
-    lf = "lf"
-    delay = "delay"
-    laststopid = "laststopid"
-    finalstopid = "finalstopid"
-    isinactive = "isinactive"
-    lastupdate = "lastupdate"
-
-
-async def isVehicleInBoundingBox(vehicle: dict[str], program: Program) -> bool:
-    bounding_box = program.args["bounding_box"]
-    isIn = (
-            bounding_box[BoundingBox.LAT_MIN.value]
-            <= vehicle[PublicTransitKey.lat]
-            <= bounding_box[BoundingBox.LAT_MAX.value]
-            and bounding_box[BoundingBox.LNG_MIN.value]
-            <= vehicle[PublicTransitKey.lng]
-            <= bounding_box[BoundingBox.LNG_MAX.value]
-    )
-    logger.debug(f"Vehicle {vehicle[PublicTransitKey.globalid]} is in bounding box: {isIn}")
-    return isIn
-
-
-async def get_data_source(message_store: list, program: Program, settings: dict) -> Tuple[StreamExecutionEnvironment, DataStream]:
+async def get_data_source(program: Program, settings: dict) -> Tuple[StreamExecutionEnvironment, DataStream]:
     """
     Get the Flink environment.
     :param message_store:
@@ -183,8 +150,6 @@ async def get_data_source(message_store: list, program: Program, settings: dict)
     :param settings:
     :return:
     """
-    # logger.debug("New message received", message_store[-1])
-    logger.debug("New message received")
     env = StreamExecutionEnvironment.get_execution_environment()
     env.set_parallelism(1)
     # start a checkpoint every 1000 ms
@@ -214,10 +179,100 @@ async def get_data_source(message_store: list, program: Program, settings: dict)
     # settings = EnvironmentSettings.new_instance().in_streaming_mode().use_blink_planner().build()
     # table_env = StreamTableEnvironment.create(stream_execution_environment=stream_env, environment_settings=settings)
 
-    data_source = env.from_collection(
-        collection=message_store,
-    )
+    # mode: BULK, BATCH
+    logger.debug(f"Processing mode: {program.args['mode']}, directory: {program.args['data_dir']}")
+    if program.args["mode"] == "batch":
+        data_source = env.from_source(
+            source=FileSource.for_record_stream_format(StreamFormat.text_line_format(), program.args["data_dir"].as_posix())
+            .process_static_file_set()
+            .build(),
+            watermark_strategy=WatermarkStrategy.for_monotonous_timestamps(),
+            source_name="FileSource",
+        )
+    elif program.args["mode"] == "stream":
+        data_source = env.from_source(
+            source=FileSource.for_record_stream_format(StreamFormat.text_line_format(), program.args["data_dir"].as_posix())
+            .monitor_continuously(Duration.of_seconds(4))
+            .build(),
+            watermark_strategy=WatermarkStrategy.for_monotonous_timestamps(),
+            source_name="FileSource",
+        )
+    else:
+        assert False, f"Invalid mode: {program.args['mode']}"
+
     return env, data_source
+
+
+async def preprocess_data(data_source: DataStream, program: Program) -> DataStream:
+    """
+    Preprocess the data before executing the tasks.
+    """
+    logger.debug("Preprocessing the data.")
+
+    def json_to_dict(json_record):
+        """
+        Convert a JSON record to a dictionary.
+        """
+        try:
+            return json.loads(json_record)
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse JSON record: {json_record}. Error: {e}")
+            return None
+
+    def dict_to_row(record):
+        """
+        Convert dictionary to Flink Row object for proper processing.
+        """
+        return Row(record.get("geometry"), record.get("attributes"))
+
+
+    # Convert JSON records to Python dictionaries
+    data_source = data_source.map(
+        json_to_dict, output_type=Types.MAP(Types.STRING(), Types.STRING())
+    ).filter(lambda record: record is not None)
+
+    # data_source = data_source.map(
+    #     dict_to_row,
+    #     output_type=Types.ROW_NAMED(
+    #         ["geometry", "attributes"],
+    #         [Types.MAP(Types.STRING(), Types.FLOAT()), Types.MAP(Types.STRING(), Types.STRING())]
+    #     )
+    # )
+
+    # Filter out inactive vehicles (isinactive = "false")
+    data_source = data_source.filter(
+        lambda record: record.get("attributes", {}).get("isinactive", None) == "false"
+    )
+
+    # Step 3: Key the stream by `id` (or another unique attribute) for further processing
+    class KeyById(KeySelector):
+        def get_key(self, value):
+            return str(value.get("attributes", {}).get("id", None))
+
+    data_source = data_source.key_by(KeyById())
+
+    # Define a sink to save the preprocessed data (if required)
+    sink_dir = program.args["output_dir"] / "preprocessed_data"
+    sink_dir.mkdir(parents=True, exist_ok=True)
+
+    sink = FileSink.for_row_format(
+        base_path=str(sink_dir),
+        encoder=Encoder.simple_string_encoder()
+    ).with_output_file_config(
+        OutputFileConfig.builder()
+        .with_part_prefix("preprocessed")
+        .with_part_suffix(".json")
+        .build()
+    ).with_rolling_policy(
+        RollingPolicy.default_rolling_policy()
+    ).build()
+
+    # Sink preprocessed data
+    data_source.sink_to(sink)
+
+    logger.debug("Preprocessing completed and data has been written to the sink.")
+
+    return data_source
 
 
 async def task_1(data_source: DataStream, program: Program) -> DataStream:
@@ -226,112 +281,145 @@ async def task_1(data_source: DataStream, program: Program) -> DataStream:
     """
     logger.debug("Task 1: Filtering vehicles in the specified bounding box.")
     bounding_box = program.args["bounding_box"]
-    filtered_data = data_source.filter(
-        lambda vehicle: bounding_box[BoundingBox.LAT_MIN.value]
-                        <= vehicle[PublicTransitKey.lat]
-                        <= bounding_box[BoundingBox.LAT_MAX.value]
-                        and bounding_box[BoundingBox.LNG_MIN.value]
-                        <= vehicle[PublicTransitKey.lng]
-                        <= bounding_box[BoundingBox.LNG_MAX.value]
-    )
+
+    def filter_out_inactive_vehicles(vehicle):
+        """
+        Helper function to filter out inactive vehicles.
+        """
+        formatted = pformat(vehicle)
+        logger.debug(f"Vehicle in bounding box: \n{formatted}")
+        isinactive = vehicle["attributes"]["isinactive"]
+        assert isinactive is not None, f"Invalid vehicle attributes: {isinactive}"
+        if isinstance(isinactive, str):
+            isinactive = isinactive.lower()
+            assert isinactive in ["true", "false"], f"Invalid vehicle attributes: {isinactive}"
+        if isinactive == "true":
+            isinactive = True
+        elif isinactive == "false":
+            isinactive = False
+        else:
+            assert False, f"Invalid vehicle attributes: {isinactive}"
+        return isinactive == False
+
+    def filter_out_of_bounding_box(vehicle: dict):
+        """
+        Helper function to filter and log vehicles.
+        """
+        _x = vehicle.get("geometry", {}).get("x", None)
+        _y = vehicle.get("geometry", {}).get("y", None)
+        assert _x is not None and _y is not None, f"Invalid vehicle geometry: {_x}, {_y}"
+        in_bounding_box = (
+                bounding_box[BoundingBox.LAT_MIN] <= _y <= bounding_box[BoundingBox.LAT_MAX]
+                and bounding_box[BoundingBox.LNG_MIN] <= _x <= bounding_box[BoundingBox.LNG_MAX]
+        )
+        logger.debug(f"Vehicle in bounding box: {in_bounding_box}")
+        return in_bounding_box
+
+    filtered_data = (data_source
+                     .filter(lambda vehicle: filter_out_inactive_vehicles(vehicle))
+                     .filter(lambda vehicle: filter_out_of_bounding_box(vehicle))
+                     )
     filtered_data.print()
     return filtered_data
 
 
-async def task_2(data_source: DataStream, program: Program) -> DataStream:
-    """
-    Task 2: List trolleybuses at their final stop.
-    """
-    logger.debug("Task 2: Filtering trolleybuses at their final stop.")
-    trolleybuses_at_final_stop = data_source.filter(
-        lambda vehicle: vehicle[PublicTransitKey.ltype] == 2  # Assuming ltype 2 indicates trolleybus
-                        and vehicle[PublicTransitKey.laststopid] == vehicle[PublicTransitKey.finalstopid]
-    ).map(
-        lambda vehicle: {
-            "id": vehicle[PublicTransitKey.id],
-            "stop": vehicle[PublicTransitKey.laststopid],
-            "timestamp": vehicle[PublicTransitKey.lastupdate],
-        }
-    )
-    trolleybuses_at_final_stop.print()
-    return trolleybuses_at_final_stop
+# async def task_2(data_source: DataStream, program: Program) -> DataStream:
+#     """
+#     Task 2: List trolleybuses at their final stop.
+#     """
+#     logger.debug("Task 2: Filtering trolleybuses at their final stop.")
+#     trolleybuses_at_final_stop = data_source.filter(
+#         lambda vehicle: vehicle[PublicTransitKey.ltype] == 2  # Assuming ltype 2 indicates trolleybus
+#                         and vehicle[PublicTransitKey.laststopid] == vehicle[PublicTransitKey.finalstopid]
+#     ).map(
+#         lambda vehicle: {
+#             "id": vehicle[PublicTransitKey.id],
+#             "stop": vehicle[PublicTransitKey.laststopid],
+#             "timestamp": vehicle[PublicTransitKey.lastupdate],
+#         }
+#     )
+#     trolleybuses_at_final_stop.print()
+#     return trolleybuses_at_final_stop
+#
+#
+# async def task_3(data_source: DataStream, program: Program) -> DataStream:
+#     """
+#     Task 3: List delayed vehicles reducing delay, sorted by improvement.
+#     """
+#     logger.debug("Task 3: Finding delayed vehicles reducing delay.")
+#     vehicles_with_delay = data_source.key_by(lambda vehicle: vehicle[PublicTransitKey.id]).process(
+#         ReduceDelayProcessFunction()
+#     )
+#     vehicles_with_delay.print()
+#     return vehicles_with_delay
+#
+#
+# async def task_4(data_source: DataStream, program: Program) -> DataStream:
+#     """
+#     Task 4: Min/max delay in the last 3 minutes.
+#     """
+#     logger.debug("Task 4: Calculating min/max delay in the last 3 minutes.")
+#     watermark_strategy = WatermarkStrategy.for_bounded_out_of_orderness(Duration.of_seconds(10)).with_timestamp_assigner(
+#         CustomTimestampAssigner()
+#     )
+#     delay_stream = data_source.assign_timestamps_and_watermarks(watermark_strategy).key_by(
+#         lambda vehicle: vehicle[PublicTransitKey.id]
+#     ).window(
+#         SlidingProcessingTimeWindows.of(Time.minutes(3), Time.seconds(10))
+#     ).aggregate(
+#         MinMaxDelayAggregate(),
+#         output_type=Types.TUPLE([Types.DOUBLE(), Types.DOUBLE()])
+#     )
+#     delay_stream.print()
+#     return delay_stream
+#
+#
+# async def task_5(data_source: DataStream, program: Program) -> DataStream:
+#     """
+#     Task 5: Min/max interval of the last 10 updates.
+#     """
+#     logger.debug("Task 5: Calculating min/max intervals of the last 10 updates.")
+#
+#     def map_vehicle_to_key(vehicle):
+#         return vehicle.get('attributes', {}).get('vehicleid', None)
+#
+#     interval_stream = data_source.key_by(
+#         lambda vehicle: map_vehicle_to_key(vehicle)
+#     ).flat_map(ComputeIntervalsFunction())
+#     interval_stream.print()
+#     return interval_stream
 
 
-async def task_3(data_source: DataStream, program: Program) -> DataStream:
-    """
-    Task 3: List delayed vehicles reducing delay, sorted by improvement.
-    """
-    logger.debug("Task 3: Finding delayed vehicles reducing delay.")
-    vehicles_with_delay = data_source.key_by(lambda vehicle: vehicle[PublicTransitKey.id]).process(
-        ReduceDelayProcessFunction()
-    )
-    vehicles_with_delay.print()
-    return vehicles_with_delay
-
-
-async def task_4(data_source: DataStream, program: Program) -> DataStream:
-    """
-    Task 4: Min/max delay in the last 3 minutes.
-    """
-    logger.debug("Task 4: Calculating min/max delay in the last 3 minutes.")
-    watermark_strategy = WatermarkStrategy.for_bounded_out_of_orderness(Duration.of_seconds(10)).with_timestamp_assigner(
-        CustomTimestampAssigner()
-    )
-    delay_stream = data_source.assign_timestamps_and_watermarks(watermark_strategy).key_by(
-        lambda vehicle: vehicle[PublicTransitKey.id]
-    ).window(
-        SlidingProcessingTimeWindows.of(Time.minutes(3), Time.seconds(10))
-    ).aggregate(
-        MinMaxDelayAggregate(),
-        output_type=Types.TUPLE([Types.DOUBLE(), Types.DOUBLE()])
-    )
-    delay_stream.print()
-    return delay_stream
-
-
-async def task_5(data_source: DataStream, program: Program) -> DataStream:
-    """
-    Task 5: Min/max interval of the last 10 updates.
-    """
-    logger.debug("Task 5: Calculating min/max intervals of the last 10 updates.")
-    interval_stream = data_source.key_by(
-        lambda vehicle: vehicle[PublicTransitKey.id]
-    ).flat_map(ComputeIntervalsFunction())
-    interval_stream.print()
-    return interval_stream
-
-
-async def process_task(message_store: list, program: Program):
+async def process_tasks(program: Program):
     """
     Process the specified task based on the program arguments.
     """
     TASKS = {
         1: task_1,
-        2: task_2,
-        3: task_3,
-        4: task_4,
-        5: task_5,
+        # 2: task_2,
+        # 3: task_3,
+        # 4: task_4,
+        # 5: task_5,
     }
     logger.debug(f"Starting task processing: Task {program.args['task']}.")
 
     # Get the data source
-    env, data_source = await get_data_source(message_store, program, settings={})
+    env, data_source = await get_data_source(program, settings={})
 
-    if program.args["task"] == 0:
-        # Execute all tasks if task 0 is specified
-        logger.debug("Task 0: Executing all tasks.")
-        for task_number, task_function in TASKS.items():
-            logger.debug(f"Executing Task {task_number}.")
-            data_source = await task_function(data_source, program)
-    else:
-        # Execute the specified task
-        task_function = TASKS.get(program.args["task"])
-        if task_function:
-            logger.debug(f"Executing Task {program.args['task']}.")
-            data_source = await task_function(data_source, program)
-        else:
-            logger.error(f"Invalid task number: {program.args['task']}.")
-            raise ValueError(f"Invalid task number: {program.args['task']}.")
+    # Preprocess the data
+    data_source = await preprocess_data(data_source, program)
+
+    # if 0 in program.args["task"]:
+    #     # Execute all tasks if task 0 is specified
+    #     logger.debug("Task 0: Executing all tasks.")
+    #     for task_number, task_function in TASKS.items():
+    #         logger.debug(f"Executing Task {task_number}.")
+    #         data_source = await task_function(data_source, program)
+    # else:
+    #     # Execute the specified task
+    #     for task_number in program.args["task"]:
+    #         logger.debug(f"Executing Task {program.args['task']}.")
+    #         data_source = await TASKS[task_number](data_source, program)
 
     # Execute the Flink job
     logger.debug("Task processing started.")
@@ -339,18 +427,16 @@ async def process_task(message_store: list, program: Program):
     logger.debug("Task processing completed.")
 
 
-
 class WebStreamStore:
     URI = "wss://gis.brno.cz/geoevent/ws/services/ODAE_public_transit_stream/StreamServer/subscribe?outSR=4326"
 
     def __init__(self, program):
-        self.messages = asyncio.Queue()
+        # self.messages = asyncio.Queue()
         self.program = program
         self.websocket = None
 
     async def __aenter__(self):
         self.connection = connect(self.URI)
-        self.timestamp: str = datetime.now().strftime("%Y%m%d%H%M%S")
         self.websocket = await self.connection.__aenter__()
         logger.info(f"Connected to websocket: {self.URI}")
         return self
@@ -359,47 +445,55 @@ class WebStreamStore:
         await self.connection.__aexit__(exc_type, exc_val, exc_tb)
 
     def _get_file_name(self):
-        return self.program.args["data_dir"] / f"{self.timestamp}.json"
+        timestamp: str = datetime.now().strftime("%Y%m%d%H%M%S%f")
+        return self.program.args["data_dir"] / f"{timestamp}.json"
 
     async def receive(self):
-        """ Receive messages continuously and store them. """
+        """Receive messages continuously and store them."""
+        saved_files = 0
         while True:
             message = await self.websocket.recv()
-            await self.messages.put(message)
             await self.save_to_file(message)
+            saved_files += 1
+            logger.overwrite(f"Saved {saved_files} files")
 
     async def save_to_file(self, message):
-        async with aiofile.async_open(self._get_file_name(), "a") as f:
-            # logger.debug(f"Saving message to file: {self._get_file_name()}")
+        file_name = self._get_file_name()
+        async with aiofile.async_open(file_name, "w") as f:
             await f.write(message)
 
-    async def receive_and_save(self):
-        while True:
-            message = await self.websocket.recv()
-            await self.save_to_file(message)
+    # async def receive_and_save(self):
+    #     while True:
+    #         message = await self.websocket.recv()
+    #         await self.save_to_file(message)
 
-    def is_file_processed(self):
-        try:
-            return self.file_processed
-        except AttributeError:
-            self.file_processed = False
-            return self.file_processed
+    # def is_file_processed(self):
+    #     try:
+    #         return self.file_processed
+    #     except AttributeError:
+    #         self.file_processed = False
+    #         return self.file_processed
 
-    async def get_messages(self) -> list:
-        """ Retrieve all messages and clear the store. """
-        _all = []
-        if self.program.args["process_data_file"]:
-            if self.is_file_processed():
-                raise Exception("File already processed.")
-            self.file_processed = True
-            async with aiofile.async_open(self.program.args["process_data_file"], "r") as file:
-                async for chunk in file.iter_chunked(aiofile.Reader.CHUNK_SIZE):
-                    _all.append(chunk)
-                return _all
-        else:
-            while not self.messages.empty():
-                _all.append(await self.messages.get())
-            return _all
+    # async def get_messages(self) -> list:
+    #     """ Retrieve all messages and clear the store. """
+    #     _all = []
+    #     if self.program.args["process_data_file"]:
+    #         if self.is_file_processed():
+    #             raise Exception("File already processed.")
+    #         self.file_processed = True
+    #         # Open the file and read JSON records
+    #         async with aiofile.async_open(self.program.args["process_data_file"], "r") as file:
+    #             record = None
+    #             async for line in file:
+    #                 try:
+    #                     record = record + line if record else line
+    #                 except json.JSONDecodeError as e:
+    #                     logger.warning(f"Failed to parse JSON record: {line}. Error: {e}")
+    #         return _all
+    #     else:
+    #         while not self.messages.empty():
+    #             _all.append(json.loads(await self.messages.get()))
+    #         return _all
 
 
 def parseArgs() -> dict:
@@ -414,7 +508,8 @@ def parseArgs() -> dict:
     args.add_argument(
         "--task",
         type=int,
-        default=0,
+        nargs="+",
+        default=[0],
         required=True,
         help=(
             """
@@ -435,69 +530,53 @@ def parseArgs() -> dict:
         help="Max time to wait for process one message.",
     )
     args.add_argument(
-        '--max-messages',
-        type=int,
-        default=None,
-        help="Max number of messages to process.",
-    )
-    args.add_argument(
         "--output_dir",
         type=str,
-        default=ROOT_DIR / "tmp/results",
+        required=True,
         help="Output directory for the results.",
-    )
-    args.add_argument(
-        "--checkpoint_dir",
-        type=str,
-        default=ROOT_DIR / "tmp/checkpoints",
-        help="Directory for storing checkpoints.",
     )
     args.add_argument(
         "--data_dir",
         type=str,
-        default=ROOT_DIR / "tmp/data",
+        required=True,
         help="Directory for storing messages.",
     )
     args.add_argument(
-        "--process_data_file",
+        "--mode",
         type=str,
-        default=None,
-        help="Process a single file.",
+        choices=["batch", "stream", "download"],
+        default="stream",
+        help=(
+            """
+        Mode for processing the data:
+        batch: Process the data in given directory as a batch (process only already downloaded files).
+        stream: Process the data in given directory as a stream (process and download new files simultaneously).
+        download: Download the data from the websocket (do not process the data).
+        """
+        ),
     )
-    args.add_argument(
-        "--download_data_first",
-        action="store_true",
-        default=False,
-        help="Download data only. Not processing.",
-    )
+    # args.add_argument(
+    #     "--checkpoint_dir",
+    #     type=str,
+    #     default=ROOT_DIR / "tmp/checkpoints",
+    #     help="Directory for storing checkpoints.",
+    # )
 
     _args = args.parse_args()
 
     _args.output_dir = Path(os.path.abspath(_args.output_dir))
-    _args.checkpoint_dir = Path(os.path.abspath(_args.checkpoint_dir))
-    _args.data_dir = Path(os.path.abspath(_args.data_dir))
-
     _args.output_dir.mkdir(parents=True, exist_ok=True)
-    _args.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    _args.data_dir = Path(os.path.abspath(_args.data_dir))
     _args.data_dir.mkdir(parents=True, exist_ok=True)
 
+    for task_number in _args.task:
+        assert 0 <= task_number <= 5, f"Invalid task number: {task_number}"
+
+    # _args.checkpoint_dir = Path(os.path.abspath(_args.checkpoint_dir))
+    # _args.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
     return vars(_args)
-
-
-async def process_messages(store: WebStreamStore):
-    """ Simulate processing of messages. """
-    wait_seconds=4
-    while True:
-        if store.is_file_processed():
-            break
-        messages = await store.get_messages()
-        if len(messages) > 0:
-            logger.info(f"Processing {len(messages)} messages...")
-            await process_task(messages, store.program)
-        else:
-            logger.debug(f"Waiting for messages for {wait_seconds} seconds")
-        await asyncio.sleep(wait_seconds)  # Adjust sleep time based on expected message rate
-        # sleep(20)
 
 
 async def main():
@@ -505,12 +584,16 @@ async def main():
     logger.debug(f"python3 ./src/main.py --bounding-box " + " ".join(map(str, program.args.get("bounding_box"))))
     logger.debug(f"Program arguments: {program.args}")
     async with WebStreamStore(program) as store:
-        if program.args["download_data_first"]:
-            await store.receive_and_save()
-        else:
+        if program.args["mode"] == "download":
+            await store.receive()
+        elif program.args["mode"] == "batch":
+            await process_tasks(program)
+        elif program.args["mode"] == "stream":
             receiver_task = asyncio.create_task(store.receive())
-            processor_task = asyncio.create_task(process_messages(store))
+            processor_task = asyncio.create_task(process_tasks(program))
             await asyncio.wait([receiver_task, processor_task], return_when=asyncio.FIRST_COMPLETED)
+        else:
+            assert False, f"Invalid mode: {program.args['mode']}"
 
 
 if __name__ == "__main__":
