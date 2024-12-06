@@ -41,12 +41,12 @@ RUN <<EOF
 EOF
 
 # JAVA
-ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-arm64/ \
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-arm64/ \
     PATH=$JAVA_HOME/bin:$PATH
 RUN <<EOF
     set -ex
     # Install OpenJDK 11
-    apt-get update && apt-get install -y openjdk-11-jdk --no-install-recommends
+    apt-get update && apt-get install -y openjdk-17-jdk --no-install-recommends
 
     # Clean up
     rm -rf /var/lib/apt/lists/*
