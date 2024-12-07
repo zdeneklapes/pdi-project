@@ -73,7 +73,8 @@ class Logger:
             assert False, message
 
     def overwrite(self, message):
-        print(f"\r{message}", end="")
+        if "DEBUG" in ENVIRONMENT["PRINT"]:
+            print(f"DEBUG: \r{message}", end="")
 
 
 logger = Logger()
@@ -141,14 +142,7 @@ logger = Logger()
 #         return min(acc1[0], acc2[0]), max(acc1[1], acc2[1])
 #
 
-
-async def get_data_source(program: Program, settings: dict) -> Tuple[StreamExecutionEnvironment, DataStream]:
-    """
-    Get the Flink environment.
-    :param program:
-    :param settings:
-    :return:
-    """
+async def get_env() -> StreamExecutionEnvironment:
     env = StreamExecutionEnvironment.get_execution_environment()
     cpus = os.cpu_count() // 2 or 1
     logger.info(f"Setting parallelism to {cpus}")
@@ -166,6 +160,7 @@ async def get_data_source(program: Program, settings: dict) -> Tuple[StreamExecu
     # allow only one checkpoint to be in progress at the same time
     env.get_checkpoint_config().set_max_concurrent_checkpoints(1)
     # enable externalized checkpoints which are retained after job cancellation
+    # TODO: is not supported in JVM 17 ???
     # env.get_checkpoint_config().set_externalized_checkpoint_retention(
     #     ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION
     # )
@@ -173,7 +168,6 @@ async def get_data_source(program: Program, settings: dict) -> Tuple[StreamExecu
     env.get_checkpoint_config().enable_unaligned_checkpoints()
 
     env.set_buffer_timeout(20000)  # Set buffer timeout to 20 seconds
-
     # set the checkpoint storage to file system
     checkpoint_dir = ROOT_DIR / "tmp/checkpoints"
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -182,25 +176,41 @@ async def get_data_source(program: Program, settings: dict) -> Tuple[StreamExecu
     # settings = EnvironmentSettings.new_instance().in_streaming_mode().use_blink_planner().build()
     # table_env = StreamTableEnvironment.create(stream_execution_environment=stream_env, environment_settings=settings)
 
+    return env
+
+
+async def get_data_source(program: Program, settings: dict) -> Tuple[StreamExecutionEnvironment, DataStream]:
+    """
+    Get the Flink environment.
+    :param program:
+    :param settings:
+    :return:
+    """
+    env = await get_env()
     # mode: BULK, BATCH
     logger.debug(f"Output directory: {program.args['data_dir']}")
     if program.args["mode"] == "batch":
         logger.debug("Processing data in BATCH mode.")
         data_source = env.from_source(
-            source=FileSource.for_record_stream_format(StreamFormat.text_line_format(), program.args["data_dir"].as_posix())
+            source=FileSource.for_record_stream_format(
+                StreamFormat.text_line_format(),
+                program.args["data_dir"].as_posix()
+            )
             .process_static_file_set()
+            # .monitor_continuously(Duration.of_seconds(10)) # TODO: Remove
             .build(),
-            # watermark_strategy=WatermarkStrategy.for_monotonous_timestamps(),
-            watermark_strategy=WatermarkStrategy.for_monotonous_timestamps().with_idleness(Duration.of_seconds(30)),
+            watermark_strategy=WatermarkStrategy.for_monotonous_timestamps(),
             source_name="FileSource",
         )
     elif program.args["mode"] == "stream":
         logger.debug("Processing data in STREAM mode.")
         data_source = env.from_source(
-            source=FileSource.for_record_stream_format(StreamFormat.text_line_format(), program.args["data_dir"].as_posix())
-            .monitor_continuously(Duration.of_seconds(11))
+            source=FileSource.for_record_stream_format(
+                StreamFormat.text_line_format(),
+                program.args["data_dir"].as_posix()
+            )
+            .monitor_continuously(Duration.of_seconds(10))
             .build(),
-            # watermark_strategy=WatermarkStrategy.for_monotonous_timestamps(),
             watermark_strategy=WatermarkStrategy.for_monotonous_timestamps().with_idleness(Duration.of_seconds(30)),
             source_name="FileSource",
         )
@@ -379,10 +389,18 @@ async def task_1(data_source: DataStream, program: Program) -> DataStream:
 
     keyed_data = filtered_data.key_by(KeyById())
 
-    # Define a sink to save the filtered results to a CSV file
-    sink_dir = program.args["output_dir"] / "filtered_vehicles"
-    sink_dir.mkdir(parents=True, exist_ok=True)
+    # PRINT
+    asyncio.sleep(2)
+    formatted_data = data_source.map(
+        format_preprocessed_data,
+        output_type=Types.STRING()
+    )
+    formatted_data.print()
+    asyncio.sleep(2)
 
+    # SINK
+    sink_dir = program.args["output_dir"] / "task1"
+    sink_dir.mkdir(parents=True, exist_ok=True)
     sink = FileSink.for_row_format(
         base_path=str(sink_dir),
         encoder=Encoder.simple_string_encoder()
@@ -394,15 +412,7 @@ async def task_1(data_source: DataStream, program: Program) -> DataStream:
     ).with_rolling_policy(
         RollingPolicy.default_rolling_policy()
     ).build()
-
-    # Sink preprocessed data
     data_source.sink_to(sink)
-
-    formatted_data = data_source.map(
-        format_preprocessed_data,
-        output_type=Types.STRING()
-    )
-    formatted_data.print()
 
     logger.debug("Task 1 completed. Results printed and saved.")
     return keyed_data
@@ -442,12 +452,21 @@ async def task_2(data_source: DataStream, program: Program) -> DataStream:
         )
 
     # Filter trolleybuses that have reached their final stop
-    data_source = data_source.filter(is_trolleybus_at_final_stop)
+    filtered_data = data_source.filter(is_trolleybus_at_final_stop)
 
-    # Sink the data to a CSV file for logging
-    sink_dir = program.args["output_dir"] / "trolleybuses_final_stop"
+    # PRINT
+    filtered_data.map(
+        format_trolleybus_data,
+        output_type=Types.STRING()
+    ).print()
+
+    # with filtered_data.execute_and_collect() as results:
+    #     for result in results:
+    #         print(result)
+
+    # SINK
+    sink_dir = program.args["output_dir"] / "task2"
     sink_dir.mkdir(parents=True, exist_ok=True)
-
     sink = FileSink.for_row_format(
         base_path=str(sink_dir),
         encoder=Encoder.simple_string_encoder()
@@ -459,18 +478,12 @@ async def task_2(data_source: DataStream, program: Program) -> DataStream:
     ).with_rolling_policy(
         RollingPolicy.default_rolling_policy()
     ).build()
-
-    data_source.sink_to(sink)
-
-    # Format the data for better readability
-    formatted_data = data_source.map(
-        format_trolleybus_data,
-        output_type=Types.STRING()
-    )
-    formatted_data.print()
+    filtered_data.sink_to(sink)
+    # data_source.sink_to(sink)
 
     logger.debug("Task 2 completed. Results printed and saved.")
-    return data_source
+    return filtered_data
+    # return data_source
 
 
 # async def task_3(data_source: DataStream, program: Program) -> DataStream:
@@ -478,13 +491,9 @@ async def task_2(data_source: DataStream, program: Program) -> DataStream:
 #     Task 3: List delayed vehicles reducing delay, sorted by improvement.
 #     """
 #     logger.debug("Task 3: Finding delayed vehicles reducing delay.")
-#     vehicles_with_delay = data_source.key_by(lambda vehicle: vehicle[PublicTransitKey.id]).process(
-#         ReduceDelayProcessFunction()
-#     )
-#     vehicles_with_delay.print()
-#     return vehicles_with_delay
-#
-#
+#     return foo
+
+
 # async def task_4(data_source: DataStream, program: Program) -> DataStream:
 #     """
 #     Task 4: Min/max delay in the last 3 minutes.
@@ -520,6 +529,10 @@ async def task_2(data_source: DataStream, program: Program) -> DataStream:
 #     interval_stream.print()
 #     return interval_stream
 
+from concurrent.futures import ThreadPoolExecutor
+
+_executor = ThreadPoolExecutor(os.cpu_count() // 2 or 1)
+
 
 async def process_tasks(program: Program):
     """
@@ -554,7 +567,10 @@ async def process_tasks(program: Program):
 
     # Execute the Flink job
     logger.debug("Task processing started.")
-    env.execute("Public Transit Stream Processing")
+    # run executor in asyncio
+    await asyncio.get_event_loop().run_in_executor(_executor, env.execute, "Public Transit Stream Processing")
+    # env.execute("Public Transit Stream Processing")
+    env.close()
     logger.debug("Task processing completed.")
 
 
@@ -581,6 +597,7 @@ class WebStreamStore:
 
     async def receive(self):
         """Receive messages continuously and store them."""
+        logger.debug("Receiving messages from the websocket.")
         saved_files = 0
         while True:
             message = await self.websocket.recv()
@@ -592,6 +609,7 @@ class WebStreamStore:
         file_name = self._get_file_name()
         async with aiofile.async_open(file_name, "w") as f:
             await f.write(message)
+
 
 def parseArgs() -> dict:
     args = ArgumentParser()
@@ -682,13 +700,17 @@ async def main():
     logger.debug(f"Program arguments: {program.args}")
     async with WebStreamStore(program) as store:
         if program.args["mode"] == "download":
+            logger.info("Downloading data from the websocket.")
             await store.receive()
         elif program.args["mode"] == "batch":
+            logger.info("Processing data in BATCH mode.")
             await process_tasks(program)
         elif program.args["mode"] == "stream":
-            receiver_task = asyncio.create_task(store.receive())
-            processor_task = asyncio.create_task(process_tasks(program))
-            await asyncio.wait([receiver_task, processor_task], return_when=asyncio.FIRST_COMPLETED)
+            logger.info("Processing data in STREAM mode.")
+            # receiver_task = asyncio.create_task(store.receive())
+            # processor_task = asyncio.create_task(process_tasks(program))
+            # await asyncio.wait([receiver_task, processor_task], return_when=asyncio.FIRST_COMPLETED)
+            await asyncio.gather(store.receive(), process_tasks(program))
         else:
             assert False, f"Invalid mode: {program.args['mode']}"
 
