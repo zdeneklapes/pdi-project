@@ -12,10 +12,13 @@ Installation according to [INSTALL.md](INSTALL.md) and testing according to [TES
 
 ## References
 
+- https://rychly-edu.gitlab.io/dist-apps/project/#zpracovani-proudu-dat-arcgis-stream-services-z-dopravy-idsjmk-pomoci-apache-sparkflink
 - https://nightlies.apache.org/flink/flink-docs-master/docs/dev/python/overview/
 - https://nightlies.apache.org/flink/flink-docs-master/api/python/reference/
 
-## Assignment
+## [Assignment](https://rychly-edu.gitlab.io/dist-apps/project/#zpracovani-proudu-dat-arcgis-stream-services-z-dopravy-idsjmk-pomoci-apache-sparkflink)
+
+
 
 ### Data Source:
 
@@ -80,4 +83,3 @@ Installation according to [INSTALL.md](INSTALL.md) and testing according to [TES
     - `README.md` (sources and licenses).
     - `INSTALL.md` (setup and deployment).
     - `TESTING.md` (tests and expected results).
-      """
