@@ -26,6 +26,24 @@ class BoundingBox(Enum):
     LNG_MIN = 2
     LNG_MAX = 3
 
+
+def get_sink(program: Program, task_name: str) -> FileSink:
+    sink_dir = program.args["output_dir"] / task_name
+    sink_dir.mkdir(parents=True, exist_ok=True)
+    sink = FileSink.for_row_format(
+        base_path=str(sink_dir),
+        encoder=Encoder.simple_string_encoder()
+    ).with_output_file_config(
+        OutputFileConfig.builder()
+        .with_part_prefix("task3")
+        .with_part_suffix(".txt")
+        .build()
+    ).with_rolling_policy(
+        RollingPolicy.default_rolling_policy()
+    ).build()
+    return sink
+
+
 def preprocess_data(data_source: DataStream, program: Program) -> DataStream:
     """
     Preprocess the data before executing the tasks.
@@ -106,20 +124,7 @@ def preprocess_data(data_source: DataStream, program: Program) -> DataStream:
     data_source = data_source.key_by(KeyById())
 
     # Define a sink to save the preprocessed data (if required)
-    sink_dir = program.args["output_dir"] / "preprocessed_data"
-    sink_dir.mkdir(parents=True, exist_ok=True)
-
-    sink = FileSink.for_row_format(
-        base_path=str(sink_dir),
-        encoder=Encoder.simple_string_encoder()
-    ).with_output_file_config(
-        OutputFileConfig.builder()
-        .with_part_prefix("preprocessed")
-        .with_part_suffix(".txt")
-        .build()
-    ).with_rolling_policy(
-        RollingPolicy.default_rolling_policy()
-    ).build()
+    sink = get_sink(program, "preprocessed")
 
     # Sink preprocessed data
     data_source.sink_to(sink)
@@ -135,11 +140,7 @@ def preprocess_data(data_source: DataStream, program: Program) -> DataStream:
     return data_source
 
 
-
-
-
-
-def get_env(program:Program) -> StreamExecutionEnvironment:
+def get_env(program: Program) -> StreamExecutionEnvironment:
     env = StreamExecutionEnvironment.get_execution_environment()
     cpus = os.cpu_count() // 2 or 1
     program.logger.info(f"Setting parallelism to {cpus}")
@@ -199,7 +200,7 @@ def get_data_source(program: Program, settings: dict) -> Tuple[StreamExecutionEn
             .build(),
             watermark_strategy=WatermarkStrategy.for_monotonous_timestamps(),
             source_name="FileSource",
-            )
+        )
     elif program.args["mode"] == "stream":
         program.logger.debug("Processing data in STREAM mode.")
         data_source = env.from_source(
@@ -211,7 +212,7 @@ def get_data_source(program: Program, settings: dict) -> Tuple[StreamExecutionEn
             .build(),
             watermark_strategy=WatermarkStrategy.for_monotonous_timestamps().with_idleness(Duration.of_seconds(30)),
             source_name="FileSource",
-            )
+        )
     else:
         env.close()
         assert False, f"Invalid mode: {program.args['mode']}"
@@ -244,8 +245,6 @@ def format_preprocessed_data(record: Row):
         # f"globalid: {row['globalid']:>5}"
     )
     return str_stdout
-
-
 
 
 def task_1(data_source: DataStream, program: Program) -> DataStream:
@@ -288,19 +287,7 @@ def task_1(data_source: DataStream, program: Program) -> DataStream:
     formatted_data.print()
 
     # SINK
-    sink_dir = program.args["output_dir"] / "task1"
-    sink_dir.mkdir(parents=True, exist_ok=True)
-    sink = FileSink.for_row_format(
-        base_path=str(sink_dir),
-        encoder=Encoder.simple_string_encoder()
-    ).with_output_file_config(
-        OutputFileConfig.builder()
-        .with_part_prefix("task1")
-        .with_part_suffix(".txt")
-        .build()
-    ).with_rolling_policy(
-        RollingPolicy.default_rolling_policy()
-    ).build()
+    sink = get_sink(program, "task1")
     data_source.sink_to(sink)
 
     program.logger.debug("Task 1 completed. Results printed and saved.")
@@ -354,21 +341,8 @@ def task_2(data_source: DataStream, program: Program) -> DataStream:
     #         print(result)
 
     # SINK
-    sink_dir = program.args["output_dir"] / "task2"
-    sink_dir.mkdir(parents=True, exist_ok=True)
-    sink = FileSink.for_row_format(
-        base_path=str(sink_dir),
-        encoder=Encoder.simple_string_encoder()
-    ).with_output_file_config(
-        OutputFileConfig.builder()
-        .with_part_prefix("task2")
-        .with_part_suffix(".txt")
-        .build()
-    ).with_rolling_policy(
-        RollingPolicy.default_rolling_policy()
-    ).build()
+    sink = get_sink(program, "task2")
     filtered_data.sink_to(sink)
-    # data_source.sink_to(sink)
 
     program.logger.debug("Task 2 completed. Results printed and saved.")
     return filtered_data
@@ -412,42 +386,33 @@ def task_3(data_source: DataStream, program: Program) -> DataStream:
     Task 3: List delayed vehicles reducing delay, sorted by improvement.
     """
     program.logger.debug("Processing setup for: 'Task 3' - Calculating delayed vehicles reducing delay.")
+    sink = get_sink(program, "task3")
 
-    return data_source
+    # return data_source
 
-    # # Filter vehicles with non-zero delays
-    # delayed_vehicles = data_source.filter(lambda vehicle: vehicle["delay"] > 0)
-    #
-    # # Key by vehicle ID to track delay history per vehicle
-    # keyed_vehicles = delayed_vehicles.key_by(lambda vehicle: vehicle["id"])
-    #
-    # # Apply the ReduceDelayProcessFunction
-    # reduced_delays = keyed_vehicles.process(ReduceDelayProcessFunction())
-    #
-    # from json import dumps
-    #
-    # sorted_by_improvement = reduced_delays.map(
-    #     lambda record: dumps(record),  # Serialize to JSON
-    #     output_type=Types.STRING()
-    # ).process(
-    #     lambda values: sorted(values, key=lambda x: x["improvement"], reverse=True)
-    # )
-    #
+    # Filter vehicles with non-zero delays
+    delayed_vehicles = data_source.filter(lambda vehicle: vehicle["delay"] > 0)
+
+    # Key by vehicle ID to track delay history per vehicle
+    keyed_vehicles = delayed_vehicles.key_by(lambda vehicle: vehicle["id"])
+
+    # keyed_vehicles.sink_to(sink)
+
+
+    # Apply the ReduceDelayProcessFunction
+    reduced_delays = keyed_vehicles.process(ReduceDelayProcessFunction())
+
+    sorted_by_improvement = reduced_delays.map(
+        lambda record: dumps(record),  # Serialize to JSON
+        output_type=Types.STRING()
+    ).process(
+        lambda values: sorted(values, key=lambda x: x["improvement"], reverse=True)
+    )
+
     # # Define a sink to save the results
     # sink_dir = program.args["output_dir"] / "task3"
     # sink_dir.mkdir(parents=True, exist_ok=True)
     #
-    # sink = FileSink.for_row_format(
-    #     base_path=str(sink_dir),
-    #     encoder=Encoder.simple_string_encoder()
-    # ).with_output_file_config(
-    #     OutputFileConfig.builder()
-    #     .with_part_prefix("task3")
-    #     .with_part_suffix(".txt")
-    #     .build()
-    # ).with_rolling_policy(
-    #     RollingPolicy.default_rolling_policy()
-    # ).build()
     #
     # sorted_by_improvement.sink_to(sink)
     #
@@ -461,9 +426,10 @@ def task_3(data_source: DataStream, program: Program) -> DataStream:
     #     )
     #
     # sorted_by_improvement.map(format_improvement).print()
-    #
-    # program.logger.debug("Task 3 completed. Results printed and saved.")
+
+    program.logger.debug("Task 3 completed. Results printed and saved.")
     # return sorted_by_improvement
+    return keyed_vehicles
 
 
 # def task_4(data_source: DataStream, program: Program) -> DataStream:
@@ -540,4 +506,3 @@ def process_tasks(program: Program):
     env.execute("Public Transit Stream Processing")
     env.close()
     program.logger.debug("Flink job completed.")
-
