@@ -11,8 +11,7 @@ from pyflink.datastream import (
     StreamExecutionEnvironment,
     CheckpointingMode,
     FileSystemCheckpointStorage,
-    DataStream,
-)
+    DataStream, )
 from pyflink.datastream.connectors.file_system import FileSink, OutputFileConfig, RollingPolicy
 from pyflink.datastream.connectors.file_system import FileSource, StreamFormat
 from pyflink.datastream.functions import KeySelector, KeyedProcessFunction
@@ -124,10 +123,10 @@ def preprocess_data(data_source: DataStream, program: Program) -> DataStream:
     data_source = data_source.key_by(KeyById())
 
     # Define a sink to save the preprocessed data (if required)
-    sink = get_sink(program, "preprocessed")
+    # sink = get_sink(program, "preprocessed")
 
     # Sink preprocessed data
-    data_source.sink_to(sink)
+    # data_source.sink_to(sink)
 
     # formatted_data = data_source.map(
     #     print_all_data_formatted,
@@ -251,7 +250,7 @@ def task_1(data_source: DataStream, program: Program) -> DataStream:
     """
     Task 1: Print vehicles in the specified bounding box and save the results.
     """
-    program.logger.debug("Task 1: Filtering vehicles in the specified bounding box.")
+    program.logger.debug("Processing setup for: 'Task 1' - Filtering vehicles in the specified bounding box.")
     bounding_box = program.args["bounding_box"]
 
     def is_within_bounding_box(vehicle: Row):
@@ -279,16 +278,16 @@ def task_1(data_source: DataStream, program: Program) -> DataStream:
 
     keyed_data = filtered_data.key_by(KeyById())
 
+    # SINK
+    sink = get_sink(program, "task1")
+    data_source.sink_to(sink)
+
     # PRINT
     formatted_data = data_source.map(
         format_preprocessed_data,
         output_type=Types.STRING()
     )
     formatted_data.print()
-
-    # SINK
-    sink = get_sink(program, "task1")
-    data_source.sink_to(sink)
 
     program.logger.debug("Task 1 completed. Results printed and saved.")
     return keyed_data
@@ -298,7 +297,7 @@ def task_2(data_source: DataStream, program: Program) -> DataStream:
     """
     Task 2: List trolleybuses at their final stop, with stop ID and time of arrival.
     """
-    program.logger.debug("Task 2: Filtering trolleybuses that have reached their final stop.")
+    program.logger.debug("Processing setup for: 'Task 2' - Filtering trolleybuses at final stop.")
 
     def is_trolleybus_at_final_stop(vehicle: Row):
         """
@@ -330,19 +329,15 @@ def task_2(data_source: DataStream, program: Program) -> DataStream:
     # Filter trolleybuses that have reached their final stop
     filtered_data = data_source.filter(is_trolleybus_at_final_stop)
 
+    # SINK
+    sink = get_sink(program, "task2")
+    filtered_data.sink_to(sink)
+
     # PRINT
     filtered_data.map(
         format_trolleybus_data,
         output_type=Types.STRING()
     ).print()
-
-    # with filtered_data.execute_and_collect() as results:
-    #     for result in results:
-    #         print(result)
-
-    # SINK
-    sink = get_sink(program, "task2")
-    filtered_data.sink_to(sink)
 
     program.logger.debug("Task 2 completed. Results printed and saved.")
     return filtered_data
@@ -350,122 +345,104 @@ def task_2(data_source: DataStream, program: Program) -> DataStream:
 
 
 class ReduceDelayProcessFunction(KeyedProcessFunction):
-    def __init__(self):
-        self.prev_delay_state = None  # State to store the previous delay
+    # class ReduceDelayProcessFunction(FlatMapFunction):
+    """
+    Tracks delay improvement for vehicles and emits the improvement when delay decreases.
+    """
+    vehicle = dict()
 
-    def open(self, runtime_context):
-        from pyflink.datastream.state import ValueStateDescriptor
-        # Initialize state for storing previous delay
-        self.prev_delay_state = runtime_context.get_state(
-            ValueStateDescriptor("prev_delay", Types.DOUBLE())
-        )
+    def __init__(self, program: Program):
+        self.prev_delay_state = None
+        self.processed_count = 0
+        self.program = program
 
-    def process_element(self, value, ctx: "KeyedProcessFunction.Context", out: "Collector"):
+    def process_element(self, value: Row, ctx: "KeyedProcessFunction.Context"):
         """
-        Process each vehicle record to calculate delay improvement.
+        Processes each vehicle record to calculate delay improvement.
         """
-        current_delay = value["delay"]
-        previous_delay = self.prev_delay_state.value()
+        # super().process_element(value, ctx)
+        # Extract current delay and vehicle ID
+        vehicle_id = value.get_fields_by_names(["id"])[0]
+        current_delay = value.get_fields_by_names(["delay"])[0]
 
-        if previous_delay is not None and current_delay < previous_delay:
-            # Calculate the improvement
-            delay_improvement = previous_delay - current_delay
-            out.collect({
-                "id": value["id"],
-                "improvement": delay_improvement,
-                "current_delay": current_delay,
-                "previous_delay": previous_delay
-            })
+        if vehicle_id not in self.vehicle.keys():
+            self.vehicle[vehicle_id] = {
+                'id': vehicle_id,
+                'improvement': 0,
+                'previous_delay': current_delay,
+                'current_delay': current_delay,
+            }
+        else:
+            if current_delay < self.vehicle[vehicle_id]["previous_delay"]:
+                self.vehicle[vehicle_id]["improvement"] = self.vehicle[vehicle_id]["current_delay"] - current_delay
+                self.vehicle[vehicle_id]["previous_delay"] = self.vehicle[vehicle_id]["current_delay"]
+                self.vehicle[vehicle_id]["current_delay"] = current_delay
+            else:
+                self.vehicle[vehicle_id]["current_delay"] = current_delay
+                yield None
 
-        # Update the state with the current delay
-        self.prev_delay_state.update(current_delay)
-
+        yield self.vehicle[vehicle_id]
 
 def task_3(data_source: DataStream, program: Program) -> DataStream:
     """
     Task 3: List delayed vehicles reducing delay, sorted by improvement.
     """
     program.logger.debug("Processing setup for: 'Task 3' - Calculating delayed vehicles reducing delay.")
+
+    # Filter vehicles with delays greater than 0
+    delayed_vehicles = data_source.filter(lambda vehicle: vehicle.get_fields_by_names(["delay"])[0] > 0)
+
+    # Key by vehicle ID to maintain delay history per vehicle
+    keyed_vehicles = delayed_vehicles.key_by(lambda vehicle: vehicle.get_fields_by_names(["id"])[0])
+
+    # Apply process function to compute delay improvements
+    annotated_vehicles = keyed_vehicles.process(ReduceDelayProcessFunction(program))
+
+    def filter_out_none(record):
+        """
+        Filter out None records.
+        """
+        if record is None:
+            return False
+        return True
+    sorted_by_improvement = annotated_vehicles.filter(filter_out_none)
+
+    # SINK
     sink = get_sink(program, "task3")
+    sorted_by_improvement.sink_to(sink)
 
-    # return data_source
+    def formatted(record: dict):
+        as_dict = record
+        return (
+            f"ID: {as_dict['id']:>6} | "
+            f"Improvement: {as_dict['improvement']:>10.2f} | "
+            f"Previous Delay: {as_dict['previous_delay']:>10.2f} | "
+            f"Current Delay: {as_dict['current_delay']:>10.2f}"
+        )
 
-    # Filter vehicles with non-zero delays
-    delayed_vehicles = data_source.filter(lambda vehicle: vehicle["delay"] > 0)
-
-    # Key by vehicle ID to track delay history per vehicle
-    keyed_vehicles = delayed_vehicles.key_by(lambda vehicle: vehicle["id"])
-
-    # keyed_vehicles.sink_to(sink)
-
-
-    # Apply the ReduceDelayProcessFunction
-    reduced_delays = keyed_vehicles.process(ReduceDelayProcessFunction())
-
-    sorted_by_improvement = reduced_delays.map(
-        lambda record: dumps(record),  # Serialize to JSON
-        output_type=Types.STRING()
-    ).process(
-        lambda values: sorted(values, key=lambda x: x["improvement"], reverse=True)
-    )
-
-    # # Define a sink to save the results
-    # sink_dir = program.args["output_dir"] / "task3"
-    # sink_dir.mkdir(parents=True, exist_ok=True)
-    #
-    #
-    # sorted_by_improvement.sink_to(sink)
-    #
-    # # Print the results for debugging
-    # def format_improvement(record):
-    #     return (
-    #         f"ID: {record['id']:<10} | "
-    #         f"Improvement: {record['improvement']:<10.2f} | "
-    #         f"Previous Delay: {record['previous_delay']:<10.2f} | "
-    #         f"Current Delay: {record['current_delay']:<10.2f}"
-    #     )
-    #
-    # sorted_by_improvement.map(format_improvement).print()
+    # PRINT
+    formatted_results = sorted_by_improvement.map(formatted, output_type=Types.STRING())
+    formatted_results.print()
 
     program.logger.debug("Task 3 completed. Results printed and saved.")
-    # return sorted_by_improvement
-    return keyed_vehicles
+    return sorted_by_improvement
 
 
-# def task_4(data_source: DataStream, program: Program) -> DataStream:
-#     """
-#     Task 4: Min/max delay in the last 3 minutes.
-#     """
-#     program.logger.debug("Task 4: Calculating min/max delay in the last 3 minutes.")
-#     watermark_strategy = WatermarkStrategy.for_bounded_out_of_orderness(Duration.of_seconds(10)).with_timestamp_assigner(
-#         CustomTimestampAssigner()
-#     )
-#     delay_stream = data_source.assign_timestamps_and_watermarks(watermark_strategy).key_by(
-#         lambda vehicle: vehicle[PublicTransitKey.id]
-#     ).window(
-#         SlidingProcessingTimeWindows.of(Time.minutes(3), Time.seconds(10))
-#     ).aggregate(
-#         MinMaxDelayAggregate(),
-#         output_type=Types.TUPLE([Types.DOUBLE(), Types.DOUBLE()])
-#     )
-#     delay_stream.print()
-#     return delay_stream
-#
-#
-# def task_5(data_source: DataStream, program: Program) -> DataStream:
-#     """
-#     Task 5: Min/max interval of the last 10 updates.
-#     """
-#     program.logger.debug("Task 5: Calculating min/max intervals of the last 10 updates.")
-#
-#     def map_vehicle_to_key(vehicle):
-#         return vehicle.get('attributes', {}).get('vehicleid', None)
-#
-#     interval_stream = data_source.key_by(
-#         lambda vehicle: map_vehicle_to_key(vehicle)
-#     ).flat_map(ComputeIntervalsFunction())
-#     interval_stream.print()
-#     return interval_stream
+def task_4(data_source: DataStream, program: Program) -> DataStream:
+    """
+    Task 4: Min/max delay in the last 3 minutes.
+    """
+    # TODO
+    return data_source
+
+
+def task_5(data_source: DataStream, program: Program) -> DataStream:
+    """
+    Task 5: Min/max interval of the last 10 updates.
+    """
+    # TODO
+    return data_source
+
 
 def process_tasks(program: Program):
     """
@@ -476,8 +453,8 @@ def process_tasks(program: Program):
         1: task_1,
         2: task_2,
         3: task_3,
-        # 4: task_4,
-        # 5: task_5,
+        4: task_4,
+        5: task_5,
     }
 
     # Get the data source
@@ -497,8 +474,8 @@ def process_tasks(program: Program):
 
     try:
         data_source = TASKS[program.args["task"]](data_source, program)
-    except:
-        program.logger.warning(f"Error in task: {program.args['task']}")
+    except Exception as e:
+        program.logger.warning(f"Error in task {program.args['task']}: {e}")
         exit(1)
 
     # Execute the Flink job
