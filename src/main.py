@@ -24,6 +24,7 @@ def download_data(program: Program):
             f.write(message)
 
     try:
+
         async def receive_messages():
             saved_files = 0
             async with websockets.connect(uri) as websocket:
@@ -35,6 +36,7 @@ def download_data(program: Program):
                     program.logger.debug_overwrite(f"Saved {saved_files} files")
 
         import asyncio
+
         asyncio.run(receive_messages())
 
     except Exception as e:
@@ -103,16 +105,16 @@ def parseArgs() -> dict:
         ),
     )
     args.add_argument(
-        '--log',
-        nargs='+',
+        "--log",
+        nargs="+",
         default=[
-            'DEBUG',
-            'INFO',
-            'WARNING',
-            'ERROR',
-            'CRITICAL',
+            # 'DEBUG',
+            # 'INFO',
+            "WARNING",
+            "ERROR",
+            "CRITICAL",
         ],
-        help='Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)'
+        help="Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
     )
 
     _args = args.parse_args()

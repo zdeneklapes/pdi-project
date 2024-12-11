@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Tuple
 
-from pandas.compat.numpy.function import MINMAX_DEFAULTS
+from numpy.lib.histograms import histogram
 from pyflink.common import Duration, Encoder
 from pyflink.common import Row
 from pyflink.common import Types
@@ -15,11 +15,15 @@ from pyflink.datastream import (
     StreamExecutionEnvironment,
     CheckpointingMode,
     FileSystemCheckpointStorage,
-    DataStream, )
+    DataStream,
+    FlatMapFunction,
+    RuntimeContext,
+)
 from pyflink.datastream.connectors.file_system import FileSink, OutputFileConfig, RollingPolicy
 from pyflink.datastream.connectors.file_system import FileSource, StreamFormat
 from pyflink.datastream.functions import AggregateFunction, ProcessWindowFunction
 from pyflink.datastream.functions import KeySelector, KeyedProcessFunction
+from pyflink.datastream.state import ValueStateDescriptor
 from pyflink.datastream.window import SlidingProcessingTimeWindows
 
 from lib.program import Program
@@ -35,17 +39,12 @@ class BoundingBox(Enum):
 def get_sink(program: Program, task_name: str) -> FileSink:
     sink_dir = program.args["output_dir"] / task_name
     sink_dir.mkdir(parents=True, exist_ok=True)
-    sink = FileSink.for_row_format(
-        base_path=str(sink_dir),
-        encoder=Encoder.simple_string_encoder()
-    ).with_output_file_config(
-        OutputFileConfig.builder()
-        .with_part_prefix("task3")
-        .with_part_suffix(".txt")
+    sink = (
+        FileSink.for_row_format(base_path=str(sink_dir), encoder=Encoder.simple_string_encoder())
+        .with_output_file_config(OutputFileConfig.builder().with_part_prefix("task3").with_part_suffix(".txt").build())
+        .with_rolling_policy(RollingPolicy.default_rolling_policy())
         .build()
-    ).with_rolling_policy(
-        RollingPolicy.default_rolling_policy()
-    ).build()
+    )
     return sink
 
 
@@ -94,32 +93,57 @@ def preprocess_data(data_source: DataStream, program: Program) -> DataStream:
         )
 
     # Convert JSON records to Python dictionaries
-    data_source = data_source.map(
-        json_to_dict, output_type=Types.MAP(Types.STRING(), Types.STRING())
-    ).filter(lambda record: record is not None)
+    data_source = data_source.map(json_to_dict, output_type=Types.MAP(Types.STRING(), Types.STRING())).filter(
+        lambda record: record is not None
+    )
 
     # Flatten and structure records into Rows
     data_source = data_source.map(
         dict_to_row,
         output_type=Types.ROW_NAMED(
             [
-                "id", "vtype", "ltype", "lat", "lng", "bearing", "lineid", "linename",
-                "routeid", "course", "lf", "delay", "laststopid", "finalstopid",
-                "isinactive", "lastupdate", "globalid"
+                "id",
+                "vtype",
+                "ltype",
+                "lat",
+                "lng",
+                "bearing",
+                "lineid",
+                "linename",
+                "routeid",
+                "course",
+                "lf",
+                "delay",
+                "laststopid",
+                "finalstopid",
+                "isinactive",
+                "lastupdate",
+                "globalid",
             ],
             [
-                Types.STRING(), Types.INT(), Types.INT(), Types.FLOAT(), Types.FLOAT(),
-                Types.FLOAT(), Types.INT(), Types.STRING(), Types.INT(), Types.STRING(),
-                Types.STRING(), Types.FLOAT(), Types.INT(), Types.INT(),
-                Types.STRING(), Types.LONG(), Types.STRING()
-            ]
-        )
+                Types.STRING(),
+                Types.INT(),
+                Types.INT(),
+                Types.FLOAT(),
+                Types.FLOAT(),
+                Types.FLOAT(),
+                Types.INT(),
+                Types.STRING(),
+                Types.INT(),
+                Types.STRING(),
+                Types.STRING(),
+                Types.FLOAT(),
+                Types.INT(),
+                Types.INT(),
+                Types.STRING(),
+                Types.LONG(),
+                Types.STRING(),
+            ],
+        ),
     )
 
     # Filter out inactive vehicles (isinactive = "false")
-    data_source = data_source.filter(
-        lambda record: record.isinactive == "false"
-    )
+    data_source = data_source.filter(lambda record: record.isinactive == "false")
 
     # Step 3: Key the stream by `id` (or another unique attribute) for further processing
     class KeyById(KeySelector):
@@ -197,10 +221,8 @@ def get_data_source(program: Program, settings: dict) -> Tuple[StreamExecutionEn
         program.logger.debug("Processing data in BATCH mode.")
         data_source = env.from_source(
             source=FileSource.for_record_stream_format(
-                StreamFormat.text_line_format(),
-                program.args["data_dir"].as_posix()
-            )
-            .process_static_file_set()
+                StreamFormat.text_line_format(), program.args["data_dir"].as_posix()
+            ).process_static_file_set()
             # .monitor_continuously(Duration.of_seconds(10)) # TODO: Remove
             .build(),
             watermark_strategy=WatermarkStrategy.for_monotonous_timestamps(),
@@ -210,8 +232,7 @@ def get_data_source(program: Program, settings: dict) -> Tuple[StreamExecutionEn
         program.logger.debug("Processing data in STREAM mode.")
         data_source = env.from_source(
             source=FileSource.for_record_stream_format(
-                StreamFormat.text_line_format(),
-                program.args["data_dir"].as_posix()
+                StreamFormat.text_line_format(), program.args["data_dir"].as_posix()
             )
             .monitor_continuously(Duration.of_seconds(10))
             .build(),
@@ -268,8 +289,8 @@ def task_1(data_source: DataStream, program: Program) -> DataStream:
         lon = row.get("lng", None)
         assert lat is not None and lon is not None, f"Invalid vehicle geometry: {vehicle}"
         in_box = (
-                bounding_box[BoundingBox.LAT_MIN.value] <= lat <= bounding_box[BoundingBox.LAT_MAX.value]
-                and bounding_box[BoundingBox.LNG_MIN.value] <= lon <= bounding_box[BoundingBox.LNG_MAX.value]
+            bounding_box[BoundingBox.LAT_MIN.value] <= lat <= bounding_box[BoundingBox.LAT_MAX.value]
+            and bounding_box[BoundingBox.LNG_MIN.value] <= lon <= bounding_box[BoundingBox.LNG_MAX.value]
         )
         return in_box
 
@@ -289,13 +310,9 @@ def task_1(data_source: DataStream, program: Program) -> DataStream:
     data_source.sink_to(sink)
 
     # PRINT
-    formatted_data = data_source.map(
-        format_preprocessed_data,
-        output_type=Types.STRING()
-    )
+    formatted_data = data_source.map(format_preprocessed_data, output_type=Types.STRING())
     formatted_data.print()
 
-    program.logger.debug("Task 1 completed. Results printed and saved.")
     return keyed_data
 
 
@@ -315,8 +332,7 @@ def task_2(data_source: DataStream, program: Program) -> DataStream:
         final_stop = row.get("finalstopid", None)
 
         # Ensure the required fields are present
-        assert vtype is not None and last_stop is not None and final_stop is not None, \
-            f"Invalid vehicle data: {row}"
+        assert vtype is not None and last_stop is not None and final_stop is not None, f"Invalid vehicle data: {row}"
 
         # Check if the vehicle is a trolleybus and has reached its final stop
         return vtype == 2 and last_stop == final_stop  # Assuming vtype 2 indicates a trolleybus
@@ -340,12 +356,8 @@ def task_2(data_source: DataStream, program: Program) -> DataStream:
     filtered_data.sink_to(sink)
 
     # PRINT
-    filtered_data.map(
-        format_trolleybus_data,
-        output_type=Types.STRING()
-    ).print()
+    filtered_data.map(format_trolleybus_data, output_type=Types.STRING()).print()
 
-    program.logger.debug("Task 2 completed. Results printed and saved.")
     return filtered_data
     # return data_source
 
@@ -373,10 +385,10 @@ class ReduceDelayProcessFunction(KeyedProcessFunction):
 
         if vehicle_id not in self.vehicle.keys():
             self.vehicle[vehicle_id] = {
-                'id': vehicle_id,
-                'improvement': 0,
-                'previous_delay': current_delay,
-                'current_delay': current_delay,
+                "id": vehicle_id,
+                "improvement": 0,
+                "previous_delay": current_delay,
+                "current_delay": current_delay,
             }
         else:
             if current_delay < self.vehicle[vehicle_id]["previous_delay"]:
@@ -388,6 +400,15 @@ class ReduceDelayProcessFunction(KeyedProcessFunction):
                 yield None
 
         yield self.vehicle[vehicle_id]
+
+
+def filter_out_none(record):
+    """
+    Filter out None records.
+    """
+    if record is None:
+        return False
+    return True
 
 
 def task_3(data_source: DataStream, program: Program) -> DataStream:
@@ -404,14 +425,6 @@ def task_3(data_source: DataStream, program: Program) -> DataStream:
 
     # Apply process function to compute delay improvements
     annotated_vehicles = keyed_vehicles.process(ReduceDelayProcessFunction(program))
-
-    def filter_out_none(record):
-        """
-        Filter out None records.
-        """
-        if record is None:
-            return False
-        return True
 
     sorted_by_improvement = annotated_vehicles.filter(filter_out_none)
 
@@ -432,7 +445,6 @@ def task_3(data_source: DataStream, program: Program) -> DataStream:
     formatted_results = sorted_by_improvement.map(formatted, output_type=Types.STRING())
     formatted_results.print()
 
-    program.logger.debug("Task 3 completed. Results printed and saved.")
     return sorted_by_improvement
 
 
@@ -445,7 +457,7 @@ class MinMaxDelayAggregateFunction(AggregateFunction):
         """
         Initializes an accumulator as a tuple of (min_delay, max_delay).
         """
-        return float('inf'), float('-inf')
+        return float("inf"), float("-inf")
 
     def add(self, value, accumulator):
         """
@@ -474,26 +486,20 @@ class MyTimestampAssigner(TimestampAssigner):
         # print("timestamp", timestamp)
         return timestamp
 
-# class MinMaxDelayWindowFunction(ProcessWindowFunction):
-#     def process(self, key: str, context: ProcessWindowFunction.Context, averages):
-#         print("key", key, "context", context, "averages", averages)
-#         average = next(iter(averages))
-#         # print("average")
-#         yield key, average
+
 class MinMaxDelayWindowFunction(ProcessWindowFunction):
     """
     Adds the window's start and end time to the min/max delay results.
     """
 
     def process(self, key: str, context: ProcessWindowFunction.Context, averages):
-    # def process(self, context: ProcessWindowFunction.Context, elements, out):
-    #     min_delay, max_delay = next(elements)  # Extract the aggregated min/max delays
+        # def process(self, context: ProcessWindowFunction.Context, elements, out):
+        #     min_delay, max_delay = next(elements)  # Extract the aggregated min/max delays
         average = next(iter(averages))
-        window_start = datetime.fromtimestamp(context.window().start / 1000).strftime('%Y-%m-%d_%H-%M-%S')
-        window_end = datetime.fromtimestamp(context.window().end / 1000).strftime('%Y-%m-%d_%H-%M-%S')
+        window_start = datetime.fromtimestamp(context.window().start / 1000).strftime("%Y-%m-%d_%H-%M-%S")
+        window_end = datetime.fromtimestamp(context.window().end / 1000).strftime("%Y-%m-%d_%H-%M-%S")
         # print("key", key, "context", context, "average", average, "window_start", window_start, "window_end", window_end)
         yield average[0], average[1], window_start, window_end
-
 
 
 def task_4(data_source: DataStream, program: Program) -> DataStream:
@@ -511,14 +517,13 @@ def task_4(data_source: DataStream, program: Program) -> DataStream:
     delayed_vehicles_with_timestamps = delayed_vehicles.assign_timestamps_and_watermarks(watermark_strategy)
 
     min_max_delays = (
-        delayed_vehicles_with_timestamps
-        .key_by(lambda vehicle: vehicle.get_fields_by_names(["id"])[0])
-        .window(SlidingProcessingTimeWindows.of(Time.seconds(3*5), Time.seconds(5)))
+        delayed_vehicles_with_timestamps.key_by(lambda vehicle: vehicle.get_fields_by_names(["id"])[0])
+        .window(SlidingProcessingTimeWindows.of(Time.seconds(3 * 60), Time.seconds(5)))
         .aggregate(
             MinMaxDelayAggregateFunction(),
             window_function=MinMaxDelayWindowFunction(),
             accumulator_type=Types.TUPLE([Types.FLOAT(), Types.FLOAT()]),
-            output_type=Types.TUPLE([Types.FLOAT(), Types.FLOAT(), Types.STRING(), Types.STRING()])
+            output_type=Types.TUPLE([Types.FLOAT(), Types.FLOAT(), Types.STRING(), Types.STRING()]),
         )
     )
 
@@ -544,12 +549,136 @@ def task_4(data_source: DataStream, program: Program) -> DataStream:
     return min_max_delays
 
 
+class MinMaxIntervalFunction(FlatMapFunction):
+    """
+    Computes the minimum and maximum interval between the last 10 timestamps.
+    """
+
+    # history = []
+
+    def open(self, runtime_context: RuntimeContext):
+        # Description for history
+        history_descriptor = ValueStateDescriptor(
+            "history",
+            Types.LIST(
+                Types.ROW_NAMED(
+                    [
+                        "id",
+                        "vtype",
+                        "ltype",
+                        "lat",
+                        "lng",
+                        "bearing",
+                        "lineid",
+                        "linename",
+                        "routeid",
+                        "course",
+                        "lf",
+                        "delay",
+                        "laststopid",
+                        "finalstopid",
+                        "isinactive",
+                        "lastupdate",
+                        "globalid",
+                    ],
+                    [
+                        Types.STRING(),
+                        Types.INT(),
+                        Types.INT(),
+                        Types.FLOAT(),
+                        Types.FLOAT(),
+                        Types.FLOAT(),
+                        Types.INT(),
+                        Types.STRING(),
+                        Types.INT(),
+                        Types.STRING(),
+                        Types.STRING(),
+                        Types.FLOAT(),
+                        Types.INT(),
+                        Types.INT(),
+                        Types.STRING(),
+                        Types.LONG(),
+                        Types.STRING(),
+                    ],
+                )
+            ),
+        )
+        self.history = runtime_context.get_state(history_descriptor)
+
+    def flat_map(self, value):
+        """
+        Flat map for descriptor values
+        :param value:
+        :return:
+        """
+        if self.history.value() is None:
+            self.history.update([value])
+
+        history = self.history.value()
+
+        if len(history) == 10:
+            min_interval = float("inf")
+            max_interval = float("-inf")
+            for i in range(1, len(history)):
+                interval = (
+                    history[i].get_fields_by_names(["lastupdate"])[0]
+                    - history[i - 1].get_fields_by_names(["lastupdate"])[0]
+                )
+                min_interval = min(min_interval, interval)
+                max_interval = max(max_interval, interval)
+            history.pop(0)
+            self.history.update(history)
+            yield {
+                "id": value.get_fields_by_names(["id"])[0],
+                "datetime_from": history[0].get_fields_by_names(["lastupdate"])[0],
+                "datetime_to": value.get_fields_by_names(["lastupdate"])[0],
+                "min_interval": min_interval,
+                "max_interval": max_interval,
+            }
+        elif len(history) < 10:
+            history.append(value)
+            self.history.update(history)
+            yield None
+        else:
+            assert False, "Should not reach here"
+
+
 def task_5(data_source: DataStream, program: Program) -> DataStream:
     """
     Task 5: Min/max interval of the last 10 updates.
     """
-    # TODO
-    return data_source
+    program.logger.debug("Processing setup for: 'Task 5' - Calculating min/max intervals of the last 10 updates.")
+
+    # Key by vehicle ID to maintain separate state for each vehicle
+    keyed_vehicles = data_source.key_by(lambda vehicle: vehicle.get_fields_by_names(["id"])[0])
+
+    # Apply process function to compute intervals
+    min_max_intervals = keyed_vehicles.flat_map(MinMaxIntervalFunction())
+
+    # Filter out None records
+    min_max_intervals = min_max_intervals.filter(filter_out_none)
+
+    # SINK
+    sink = get_sink(program, "task5")
+    min_max_intervals.sink_to(sink)
+
+    def formatted(record: dict):
+        """
+        Format the min/max interval results for logging or saving.
+        """
+        # program.logger.debug(f"Record: {record}")
+        return (
+            f"ID: {record['id']:>6} | "
+            f"From: {datetime.fromtimestamp(record['datetime_from'] / 1000).strftime('%Y-%m-%d %H:%M:%S')} | "
+            f"To: {datetime.fromtimestamp(record['datetime_to'] / 1000).strftime('%Y-%m-%d %H:%M:%S')} | "
+            f"Min Interval: {record['min_interval']:>13.2f} ms | "
+            f"Max Interval: {record['max_interval']:>13.2f} ms"
+        )
+
+    # PRINT
+    formatted_results = min_max_intervals.map(formatted, output_type=Types.STRING())
+    formatted_results.print()
+    return min_max_intervals
 
 
 def process_tasks(program: Program):

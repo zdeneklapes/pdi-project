@@ -11,5 +11,3 @@ class Program:
     ROOT_DIR = Path(__file__).parent.parent
     SRC_DIR = ROOT_DIR / "src"
     DEBUG = True
-
-
