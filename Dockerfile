@@ -1,11 +1,12 @@
-FROM --platform=linux/arm64 ubuntu:24.10 AS app
+FROM ubuntu:24.10 AS app
 
 # Environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     EDITOR=vim \
-    PATH="/app/.venv/bin:$PATH" \
     PROJECT_DIR=/opt/app
+
+#    PATH="/opt/app/.venv/bin:$PATH" \
 
 # Update system packages and install dependencies
 RUN <<EOF
@@ -60,25 +61,15 @@ RUN <<EOF
     apt-get install -y python3 python3-venv python3-pip
 EOF
 
-
-
 # Set working directory
 WORKDIR $PROJECT_DIR
 
 # Copy project dependency files
-#COPY pyproject.toml requirements.txt .python-version
 COPY pyproject.toml .python-version $PROJECT_DIR/
 
 # Install Python dependencies
 RUN <<EOF
     set -ex
-    # Upgrade pip
-#    pip3 install --upgrade pip
-#    pip3 install uv
     pip install --upgrade uv --break-system-packages
     uv sync
-    # Install dependencies (uncomment if requirements.txt is available)
-#     pip install -r requirements.txt
 EOF
-
-# Add any additional configurations or commands here if needed

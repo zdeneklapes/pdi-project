@@ -49,3 +49,8 @@ run-4:
 	python src/main.py --bounding-box -180 180 -180 180 --data_dir tmp/data/test-task-4 --output_dir tmp/results/test-task-4 --mode stream --task 4
 run-5:
 	python src/main.py --bounding-box -180 180 -180 180 --data_dir tmp/data/test-task-5 --output_dir tmp/results/test-task-5 --mode stream --task 5
+
+
+# ------
+pack:
+	zip xlapes02.zip -r src/**/*.py Makefile *.md pyproject.toml .python-version uv.lock
