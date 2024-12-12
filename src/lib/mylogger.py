@@ -5,15 +5,10 @@ from typing import Literal, List
 class MyLogger:
     # instance = None
 
-    def __init__(self, environment: List[Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]]):
+    def __init__(self, environment: List[Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]] = None):
+        if environment is None:
+            environment = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
         self.ENVIRONMENT: List[Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]] = environment
-
-    # def __new__(cls):
-    #     if cls.instance is None:
-    #         cls.instance = super(MyLogger, cls).__new__(cls)
-    #         cls.instance.log = []
-    #         cls.ENVIRONMENT: List[Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]] = environment
-    #     return cls.instance
 
     def _get_time(self):
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")

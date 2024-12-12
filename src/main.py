@@ -32,9 +32,9 @@ def download_data(program: Program):
                 program.logger.info(f"Connected to websocket: {uri}")
                 while True:
                     message = await websocket.recv()
-                    _as_dict = json.loads(message)
-                    from pprint import pprint
-                    pprint(_as_dict)
+                    # _as_dict = json.loads(message)
+                    # from pprint import pprint
+                    # pprint(_as_dict)
                     save_to_file(message, program)
                     saved_files += 1
                     program.logger.debug_overwrite(f"Saved {saved_files} files")
@@ -112,8 +112,8 @@ def parseArgs() -> dict:
         "--log",
         nargs="+",
         default=[
-            # 'DEBUG',
-            # 'INFO',
+            'DEBUG',
+            'INFO',
             "WARNING",
             "ERROR",
             "CRITICAL",
