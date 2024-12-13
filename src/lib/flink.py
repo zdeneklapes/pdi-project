@@ -368,41 +368,6 @@ def task_2(data_source: DataStream, program: Program):
     )
 
 
-class ReduceDelayProcessFunction(KeyedProcessFunction):
-    # class ReduceDelayProcessFunction(FlatMapFunction):
-    """
-    Tracks delay improvement for vehicles and emits the improvement when delay decreases.
-    """
-    vehicle = dict()
-
-    def process_element(self, value: Row, ctx: "KeyedProcessFunction.Context"):
-        """
-        Processes each vehicle record to calculate delay improvement.
-        """
-        # super().process_element(value, ctx)
-        # Extract current delay and vehicle ID
-        vehicle_id = value.get_fields_by_names(["id"])[0]
-        current_delay = value.get_fields_by_names(["delay"])[0]
-
-        if vehicle_id not in self.vehicle.keys():
-            self.vehicle[vehicle_id] = {
-                "id": vehicle_id,
-                "improvement": 0,
-                "previous_delay": current_delay,
-                "current_delay": current_delay,
-            }
-        else:
-            if current_delay < self.vehicle[vehicle_id]["previous_delay"]:
-                self.vehicle[vehicle_id]["improvement"] = self.vehicle[vehicle_id]["current_delay"] - current_delay
-                self.vehicle[vehicle_id]["previous_delay"] = self.vehicle[vehicle_id]["current_delay"]
-                self.vehicle[vehicle_id]["current_delay"] = current_delay
-            else:
-                self.vehicle[vehicle_id]["current_delay"] = current_delay
-                yield None
-
-        yield self.vehicle[vehicle_id]
-
-
 def filter_out_none(record):
     """
     Filter out None records.
@@ -415,11 +380,62 @@ def filter_out_none(record):
 class MyTimestampAssigner(TimestampAssigner):
     def extract_timestamp(self, value, record_timestamp):
         timestamp = value.get_fields_by_names(["lastupdate"])[0]
-        # print("timestamp", timestamp)
+        # print("timestamp", timestamp , "id", value.get_fields_by_names(["id"])[0])
         return timestamp
 
 
-def task_3(data_source: DataStream, program: Program) -> DataStream:
+from collections import defaultdict
+
+
+class ReduceDelayProcessFunction(FlatMapFunction):
+    """
+    Tracks delay improvement for vehicles, buffers records for sorting,
+    and emits the sorted results after processing a batch.
+    """
+    vehicles_buffer = defaultdict(list)  # Buffers processed records
+
+    def _get_improvement(self, vehicle_1, vehicle_2):
+        """
+        Calculates the delay improvement between two vehicle records.
+        """
+        delay_1 = vehicle_1.get_fields_by_names(["delay"])[0]
+        delay_2 = vehicle_2.get_fields_by_names(["delay"])[0]
+        return delay_1 - delay_2
+
+    def flat_map(self, value: Row):
+        """
+        Processes each vehicle record, calculates delay improvement, and buffers results.
+        """
+        vehicle_id = value.get_fields_by_names(["id"])[0]
+        self.vehicles_buffer[vehicle_id].append(value)
+        if len(self.vehicles_buffer[vehicle_id]) == 3:
+            # take all record where are at leats 2
+            records = [
+                {
+                    "id": vehicles[0].get_fields_by_names(["id"])[0],
+                    "improvement": self._get_improvement(vehicles[0], vehicles[1]),
+                    "previous_delay": vehicles[-2].get_fields_by_names(["delay"])[0],
+                    "current_delay": vehicles[-1].get_fields_by_names(["delay"])[0],
+                    "lastupdate": vehicles[-1].get_fields_by_names(["lastupdate"])[0],
+                }
+                for vehicles in self.vehicles_buffer.values()
+                if len(vehicles) >= 2
+            ]
+
+            # pop the first element only if there is more than 2 elements
+            for vehicles in self.vehicles_buffer.values():
+                if len(vehicles) >= 2:
+                    vehicles.pop(0)
+
+            assert all(len(vehicles) >= 1 for vehicles in self.vehicles_buffer.values()), "All vehicles should have at least 1 record here"
+
+            sorted_records = sorted(records, key=lambda x: x["improvement"], reverse=True)
+            # print("sorted_records", sorted_records)
+
+            for record in sorted_records:
+                yield record
+
+def task_3(data_source: DataStream, program: Program):
     """
     Task 3: List delayed vehicles reducing delay, sorted by improvement.
     """
@@ -432,19 +448,27 @@ def task_3(data_source: DataStream, program: Program) -> DataStream:
         .with_timestamp_assigner(MyTimestampAssigner())
     )
 
-    # Filter delayed vehicles and process them to compute delay improvements
-    improved_delay_vehicles = (
+    def filter_out_negative_improment(record):
+        """
+        Filter out negative improment records.
+        """
+        if record["improvement"] <= 0:
+            return False
+        return True
+
+    # Process the bulk of records and sort improvements
+    processed_data = (
         data_source
-        .assign_timestamps_and_watermarks(watermark_strategy)
         .filter(lambda vehicle: vehicle.get_fields_by_names(["delay"])[0] > 0)
-        .key_by(lambda vehicle: vehicle.get_fields_by_names(["id"])[0])
-        .process(ReduceDelayProcessFunction())
-        .filter(filter_out_none)
+        # .assign_timestamps_and_watermarks(watermark_strategy)
+        # .key_by(lambda vehicle: vehicle.get_fields_by_names(["id"])[0])
+        .flat_map(ReduceDelayProcessFunction())
+        .filter(filter_out_negative_improment)
     )
 
     # SINK
     sink = get_sink(program, "task3")
-    improved_delay_vehicles.sink_to(sink)
+    processed_data.sink_to(sink)
 
     def formatted(record: dict):
         """
@@ -452,51 +476,18 @@ def task_3(data_source: DataStream, program: Program) -> DataStream:
         """
         return (
             f"ID: {record['id']:>6} | "
-            f"Improvement: {record['improvement']:>10.2f} | "
-            f"Previous Delay: {record['previous_delay']:>10.2f} | "
-            f"Current Delay: {record['current_delay']:>10.2f}"
+            f"improvement: {record['improvement']:>10.2f} | "
+            f"previous Delay: {record['previous_delay']:>10.2f} | "
+            f"current Delay: {record['current_delay']:>10.2f} | "
+            f"lastupdate: {datetime.fromtimestamp(record['lastupdate'] / 1000).strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
     # PRINT
-    formatted_results = improved_delay_vehicles.map(formatted, output_type=Types.STRING())
-    formatted_results.print()
-
-    return improved_delay_vehicles
-
-
-# def task_3(data_source: DataStream, program: Program) -> DataStream:
-#     """
-#     Task 3: List delayed vehicles reducing delay, sorted by improvement.
-#     """
-#     program.logger.debug("Processing setup for: 'Task 3' - Calculating delayed vehicles reducing delay.")
-#
-#     # Key by vehicle ID to maintain delay history per vehicle
-#     improved_delay_vehicles = (
-#         data_source
-#         .filter(lambda vehicle: vehicle.get_fields_by_names(["delay"])[0] > 0)
-#         .key_by(lambda vehicle: vehicle.get_fields_by_names(["id"])[0])
-#         .process(ReduceDelayProcessFunction(program))
-#         .filter(filter_out_none)
-#     )
-#
-#     # SINK
-#     sink = get_sink(program, "task3")
-#     improved_delay_vehicles.sink_to(sink)
-#
-#     def formatted(record: dict):
-#         as_dict = record
-#         return (
-#             f"ID: {as_dict['id']:>6} | "
-#             f"Improvement: {as_dict['improvement']:>10.2f} | "
-#             f"Previous Delay: {as_dict['previous_delay']:>10.2f} | "
-#             f"Current Delay: {as_dict['current_delay']:>10.2f}"
-#         )
-#
-#     # PRINT
-#     formatted_results = improved_delay_vehicles.map(formatted, output_type=Types.STRING())
-#     formatted_results.print()
-#
-#     return improved_delay_vehicles
+    _ = (
+        processed_data
+        .map(formatted, output_type=Types.STRING())
+        .print()
+    )
 
 
 class MinMaxDelayAggregateFunction(AggregateFunction):

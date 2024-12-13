@@ -178,11 +178,11 @@ def test_data_task_3(setup_environment):
                 "routeid": 201,
                 "course": "11223",
                 "lf": "true",
-                "delay": 0,  # Initial delay
+                "delay": 0,
                 "laststopid": 3011,
                 "finalstopid": 3021,
                 "isinactive": "false",
-                "lastupdate": 1734046845000,
+                "lastupdate": 1734040000100,
                 "globalid": "{AA1BB2CC3-DD4EE5-FF67890-11234567890A}",
             },
         },
@@ -202,63 +202,41 @@ def test_data_task_3(setup_environment):
                 "routeid": 201,
                 "course": "11223",
                 "lf": "true",
-                "delay": 0,  # Initial delay
+                "delay": 0,
                 "laststopid": 3011,
                 "finalstopid": 3021,
                 "isinactive": "false",
-                "lastupdate": 1734046845000,
+                "lastupdate": 1734040000200,
                 "globalid": "{AA1BB2CC3-DD4EE5-FF67890-11234567890A}",
             },
         },
-        {
-            "geometry": {
-                "spatialReference": {"wkid": 4326},
-                "x": 16.602111,
-                "y": 49.194444,
-            },
-            "attributes": {
-                "id": "3001",
-                "vtype": 3,
-                "ltype": 2,
-                "bearing": 120.0,
-                "lineid": 101,
-                "linename": "Line_101",
-                "routeid": 201,
-                "course": "11223",
-                "lf": "true",
-                "delay": 15.0,  # Initial delay
-                "laststopid": 3011,
-                "finalstopid": 3021,
-                "isinactive": "false",
-                "lastupdate": 1734046845000,
-                "globalid": "{AA1BB2CC3-DD4EE5-FF67890-11234567890A}",
-            },
-        },
-        {
-            "geometry": {
-                "spatialReference": {"wkid": 4326},
-                "x": 16.602111,
-                "y": 49.194444,
-            },
-            "attributes": {
-                "id": "3001",
-                "vtype": 3,
-                "ltype": 2,
-                "bearing": 120.0,
-                "lineid": 101,
-                "linename": "Line_101",
-                "routeid": 201,
-                "course": "11223",
-                "lf": "true",
-                "delay": 10.0,  # Initial delay
-                "laststopid": 3011,
-                "finalstopid": 3021,
-                "isinactive": "false",
-                "lastupdate": 1734046845000,
-                "globalid": "{AA1BB2CC3-DD4EE5-FF67890-11234567890A}",
-            },
-        },
-        {
+        *[
+            {
+                "geometry": {
+                    "spatialReference": {"wkid": 4326},
+                    "x": 16.602111,
+                    "y": 49.194444,
+                },
+                "attributes": {
+                    "id": "3001",
+                    "vtype": 3,
+                    "ltype": 2,
+                    "bearing": 120.0,
+                    "lineid": 101,
+                    "linename": "Line_101",
+                    "routeid": 201,
+                    "course": "11223",
+                    "lf": "true",
+                    "delay": 20.0 - (i),
+                    "laststopid": 3011,
+                    "finalstopid": 3021,
+                    "isinactive": "false",
+                    "lastupdate": int(f"1734040000{i}00"),
+                    "globalid": "{AA1BB2CC3-DD4EE5-FF67890-11234567890A}",
+                },
+            } for i in range(3)
+        ],
+        *[{
             "geometry": {
                 "spatialReference": {"wkid": 4326},
                 "x": 16.615555,
@@ -274,39 +252,15 @@ def test_data_task_3(setup_environment):
                 "routeid": 202,
                 "course": "44556",
                 "lf": "false",
-                "delay": 8.0,  # Initial delay
+                "delay": 20.0 - (2 * i),
                 "laststopid": 3012,
                 "finalstopid": 3022,
                 "isinactive": "false",
-                "lastupdate": 1734046845100,
+                "lastupdate": int(f"1734040000{i}00"),
                 "globalid": "{BB2CC3DD4-EE5FF6-7890112-34567890AABB}",
             },
-        },
-        {
-            "geometry": {
-                "spatialReference": {"wkid": 4326},
-                "x": 16.615555,
-                "y": 49.199999,
-            },
-            "attributes": {
-                "id": "3002",
-                "vtype": 3,
-                "ltype": 2,
-                "bearing": 210.0,
-                "lineid": 102,
-                "linename": "Line_102",
-                "routeid": 202,
-                "course": "44556",
-                "lf": "false",
-                "delay": 10.0,  # Initial delay
-                "laststopid": 3012,
-                "finalstopid": 3022,
-                "isinactive": "false",
-                "lastupdate": 1734046845100,
-                "globalid": "{BB2CC3DD4-EE5FF6-7890112-34567890AABB}",
-            },
-        },
-        {
+        } for i in range(3)],
+        *[{
             "geometry": {
                 "spatialReference": {"wkid": 4326},
                 "x": 16.620000,
@@ -322,38 +276,14 @@ def test_data_task_3(setup_environment):
                 "routeid": 203,
                 "course": "77889",
                 "lf": "true",
-                "delay": 20.0,  # Initial delay
+                "delay": 20.0 - (3 * i),
                 "laststopid": 3013,
                 "finalstopid": 3023,
                 "isinactive": "false",
-                "lastupdate": 1734046845200,
+                "lastupdate": int(f"1734040000{i}00"),
                 "globalid": "{CC3DD4EE5-FF6789-0112345-67890AABBCD3}",
             },
-        },
-        {
-            "geometry": {
-                "spatialReference": {"wkid": 4326},
-                "x": 16.620000,
-                "y": 49.195000,
-            },
-            "attributes": {
-                "id": "3003",
-                "vtype": 3,
-                "ltype": 2,
-                "bearing": 300.0,
-                "lineid": 103,
-                "linename": "Line_103",
-                "routeid": 203,
-                "course": "77889",
-                "lf": "true",
-                "delay": 10.0,  # Initial delay
-                "laststopid": 3013,
-                "finalstopid": 3023,
-                "isinactive": "false",
-                "lastupdate": 1734046845200,
-                "globalid": "{CC3DD4EE5-FF6789-0112345-67890AABBCD3}",
-            },
-        },
+        } for i in range(3)]
     ]
     create_data(static_data, setup_environment['data_dir'] / "3")
 
