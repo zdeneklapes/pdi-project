@@ -4,7 +4,6 @@ from datetime import datetime
 from enum import Enum
 from typing import Tuple
 
-from numpy.lib.histograms import histogram
 from pyflink.common import Duration, Encoder
 from pyflink.common import Row
 from pyflink.common import Types
@@ -188,13 +187,12 @@ def get_env(program: Program) -> StreamExecutionEnvironment:
     # allow only one checkpoint to be in progress at the same time
     env.get_checkpoint_config().set_max_concurrent_checkpoints(1)
     # enable externalized checkpoints which are retained after job cancellation
-    # TODO: is not supported in JVM 17 ???
+    # TODO: is not supported in JVM 21 ???
     # env.get_checkpoint_config().set_externalized_checkpoint_retention(
     #     ExternalizedCheckpointRetention.RETAIN_ON_CANCELLATION
     # )
     # enables the unaligned checkpoints
     env.get_checkpoint_config().enable_unaligned_checkpoints()
-
     env.set_buffer_timeout(20000)  # Set buffer timeout to 20 seconds
     # set the checkpoint storage to file system
     checkpoint_dir = program.ROOT_DIR / "tmp/checkpoints"
@@ -203,9 +201,7 @@ def get_env(program: Program) -> StreamExecutionEnvironment:
     env.get_checkpoint_config().set_checkpoint_storage(file_storage)
     # settings = EnvironmentSettings.new_instance().in_streaming_mode().use_blink_planner().build()
     # table_env = StreamTableEnvironment.create(stream_execution_environment=stream_env, environment_settings=settings)
-
     return env
-
 
 def get_data_source(program: Program, settings: dict) -> Tuple[StreamExecutionEnvironment, DataStream]:
     """
@@ -289,13 +285,12 @@ def task_1(data_source: DataStream, program: Program) -> DataStream:
         lon = row.get("lng", None)
         assert lat is not None and lon is not None, f"Invalid vehicle geometry: {vehicle}"
         in_box = (
-            bounding_box[BoundingBox.LAT_MIN.value] <= lat <= bounding_box[BoundingBox.LAT_MAX.value]
-            and bounding_box[BoundingBox.LNG_MIN.value] <= lon <= bounding_box[BoundingBox.LNG_MAX.value]
+                bounding_box[BoundingBox.LAT_MIN.value] <= lat <= bounding_box[BoundingBox.LAT_MAX.value]
+                and bounding_box[BoundingBox.LNG_MIN.value] <= lon <= bounding_box[BoundingBox.LNG_MAX.value]
         )
         return in_box
 
     # Filter vehicles within the bounding box
-    filtered_data = data_source.filter(is_within_bounding_box)
 
     # Key vehicles by ID for possible downstream operations
     class KeyById(KeySelector):
@@ -303,17 +298,21 @@ def task_1(data_source: DataStream, program: Program) -> DataStream:
             row = value.as_dict()
             return row.get("id")
 
-    keyed_data = filtered_data.key_by(KeyById())
+    new_data = (
+        data_source
+        .key_by(KeyById())
+        .filter(is_within_bounding_box)
+    )
 
     # SINK
     sink = get_sink(program, "task1")
-    data_source.sink_to(sink)
+    new_data.sink_to(sink)
 
     # PRINT
-    formatted_data = data_source.map(format_preprocessed_data, output_type=Types.STRING())
+    formatted_data = new_data.map(format_preprocessed_data, output_type=Types.STRING())
     formatted_data.print()
 
-    return keyed_data
+    return new_data
 
 
 def task_2(data_source: DataStream, program: Program) -> DataStream:
@@ -349,7 +348,11 @@ def task_2(data_source: DataStream, program: Program) -> DataStream:
         )
 
     # Filter trolleybuses that have reached their final stop
-    filtered_data = data_source.filter(is_trolleybus_at_final_stop)
+    filtered_data = (
+        data_source
+        .key_by(lambda vehicle: vehicle.get_fields_by_names(["id"])[0])
+        .filter(is_trolleybus_at_final_stop)
+    )
 
     # SINK
     sink = get_sink(program, "task2")
@@ -417,20 +420,18 @@ def task_3(data_source: DataStream, program: Program) -> DataStream:
     """
     program.logger.debug("Processing setup for: 'Task 3' - Calculating delayed vehicles reducing delay.")
 
-    # Filter vehicles with delays greater than 0
-    delayed_vehicles = data_source.filter(lambda vehicle: vehicle.get_fields_by_names(["delay"])[0] > 0)
-
     # Key by vehicle ID to maintain delay history per vehicle
-    keyed_vehicles = delayed_vehicles.key_by(lambda vehicle: vehicle.get_fields_by_names(["id"])[0])
-
-    # Apply process function to compute delay improvements
-    annotated_vehicles = keyed_vehicles.process(ReduceDelayProcessFunction(program))
-
-    sorted_by_improvement = annotated_vehicles.filter(filter_out_none)
+    improved_delay_vehicles = (
+        data_source
+        .filter(lambda vehicle: vehicle.get_fields_by_names(["delay"])[0] > 0)
+        .key_by(lambda vehicle: vehicle.get_fields_by_names(["id"])[0])
+        .process(ReduceDelayProcessFunction(program))
+        .filter(filter_out_none)
+    )
 
     # SINK
     sink = get_sink(program, "task3")
-    sorted_by_improvement.sink_to(sink)
+    improved_delay_vehicles.sink_to(sink)
 
     def formatted(record: dict):
         as_dict = record
@@ -442,10 +443,10 @@ def task_3(data_source: DataStream, program: Program) -> DataStream:
         )
 
     # PRINT
-    formatted_results = sorted_by_improvement.map(formatted, output_type=Types.STRING())
+    formatted_results = improved_delay_vehicles.map(formatted, output_type=Types.STRING())
     formatted_results.print()
 
-    return sorted_by_improvement
+    return improved_delay_vehicles
 
 
 class MinMaxDelayAggregateFunction(AggregateFunction):
@@ -621,8 +622,8 @@ class MinMaxIntervalFunction(FlatMapFunction):
             max_interval = float("-inf")
             for i in range(1, len(history)):
                 interval = (
-                    history[i].get_fields_by_names(["lastupdate"])[0]
-                    - history[i - 1].get_fields_by_names(["lastupdate"])[0]
+                        history[i].get_fields_by_names(["lastupdate"])[0]
+                        - history[i - 1].get_fields_by_names(["lastupdate"])[0]
                 )
                 min_interval = min(min_interval, interval)
                 max_interval = max(max_interval, interval)
@@ -699,15 +700,6 @@ def process_tasks(program: Program):
 
     # Preprocess the data
     data_source = preprocess_data(data_source, program)
-
-    # if 0 in program.args["task"]:
-    #     # Execute all tasks if task 0 is specified
-    #     for task_number, task_function in TASKS.items():
-    #         data_source = task_function(data_source, program)
-    # else:
-    #     # Execute the specified task
-    #     for task_number in program.args["task"]:
-    #         data_source = TASKS[task_number](data_source, program)
 
     try:
         data_source = TASKS[program.args["task"]](data_source, program)
