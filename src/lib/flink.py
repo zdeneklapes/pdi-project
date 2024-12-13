@@ -203,6 +203,7 @@ def get_env(program: Program) -> StreamExecutionEnvironment:
     # table_env = StreamTableEnvironment.create(stream_execution_environment=stream_env, environment_settings=settings)
     return env
 
+
 def get_data_source(program: Program, settings: dict) -> Tuple[StreamExecutionEnvironment, DataStream]:
     """
     Get the Flink environment.
@@ -269,7 +270,7 @@ def format_preprocessed_data(record: Row):
     return str_stdout
 
 
-def task_1(data_source: DataStream, program: Program) -> DataStream:
+def task_1(data_source: DataStream, program: Program):
     """
     Task 1: Print vehicles in the specified bounding box and save the results.
     """
@@ -309,13 +310,14 @@ def task_1(data_source: DataStream, program: Program) -> DataStream:
     new_data.sink_to(sink)
 
     # PRINT
-    formatted_data = new_data.map(format_preprocessed_data, output_type=Types.STRING())
-    formatted_data.print()
+    _ = (
+        new_data
+        .map(format_preprocessed_data, output_type=Types.STRING())
+        .print()
+    )
 
-    return new_data
 
-
-def task_2(data_source: DataStream, program: Program) -> DataStream:
+def task_2(data_source: DataStream, program: Program):
     """
     Task 2: List trolleybuses at their final stop, with stop ID and time of arrival.
     """
@@ -359,10 +361,11 @@ def task_2(data_source: DataStream, program: Program) -> DataStream:
     filtered_data.sink_to(sink)
 
     # PRINT
-    filtered_data.map(format_trolleybus_data, output_type=Types.STRING()).print()
-
-    return filtered_data
-    # return data_source
+    (
+        filtered_data
+        .map(format_trolleybus_data, output_type=Types.STRING())
+        .print()
+    )
 
 
 class ReduceDelayProcessFunction(KeyedProcessFunction):
@@ -371,11 +374,6 @@ class ReduceDelayProcessFunction(KeyedProcessFunction):
     Tracks delay improvement for vehicles and emits the improvement when delay decreases.
     """
     vehicle = dict()
-
-    def __init__(self, program: Program):
-        self.prev_delay_state = None
-        self.processed_count = 0
-        self.program = program
 
     def process_element(self, value: Row, ctx: "KeyedProcessFunction.Context"):
         """
@@ -414,18 +412,33 @@ def filter_out_none(record):
     return True
 
 
+class MyTimestampAssigner(TimestampAssigner):
+    def extract_timestamp(self, value, record_timestamp):
+        timestamp = value.get_fields_by_names(["lastupdate"])[0]
+        # print("timestamp", timestamp)
+        return timestamp
+
+
 def task_3(data_source: DataStream, program: Program) -> DataStream:
     """
     Task 3: List delayed vehicles reducing delay, sorted by improvement.
     """
     program.logger.debug("Processing setup for: 'Task 3' - Calculating delayed vehicles reducing delay.")
 
-    # Key by vehicle ID to maintain delay history per vehicle
+    # Assign timestamps and watermarks using MyTimestampAssigner
+    watermark_strategy = (
+        WatermarkStrategy
+        .for_bounded_out_of_orderness(Duration.of_millis(100))
+        .with_timestamp_assigner(MyTimestampAssigner())
+    )
+
+    # Filter delayed vehicles and process them to compute delay improvements
     improved_delay_vehicles = (
         data_source
+        .assign_timestamps_and_watermarks(watermark_strategy)
         .filter(lambda vehicle: vehicle.get_fields_by_names(["delay"])[0] > 0)
         .key_by(lambda vehicle: vehicle.get_fields_by_names(["id"])[0])
-        .process(ReduceDelayProcessFunction(program))
+        .process(ReduceDelayProcessFunction())
         .filter(filter_out_none)
     )
 
@@ -434,12 +447,14 @@ def task_3(data_source: DataStream, program: Program) -> DataStream:
     improved_delay_vehicles.sink_to(sink)
 
     def formatted(record: dict):
-        as_dict = record
+        """
+        Format the results for logging or printing.
+        """
         return (
-            f"ID: {as_dict['id']:>6} | "
-            f"Improvement: {as_dict['improvement']:>10.2f} | "
-            f"Previous Delay: {as_dict['previous_delay']:>10.2f} | "
-            f"Current Delay: {as_dict['current_delay']:>10.2f}"
+            f"ID: {record['id']:>6} | "
+            f"Improvement: {record['improvement']:>10.2f} | "
+            f"Previous Delay: {record['previous_delay']:>10.2f} | "
+            f"Current Delay: {record['current_delay']:>10.2f}"
         )
 
     # PRINT
@@ -447,6 +462,41 @@ def task_3(data_source: DataStream, program: Program) -> DataStream:
     formatted_results.print()
 
     return improved_delay_vehicles
+
+
+# def task_3(data_source: DataStream, program: Program) -> DataStream:
+#     """
+#     Task 3: List delayed vehicles reducing delay, sorted by improvement.
+#     """
+#     program.logger.debug("Processing setup for: 'Task 3' - Calculating delayed vehicles reducing delay.")
+#
+#     # Key by vehicle ID to maintain delay history per vehicle
+#     improved_delay_vehicles = (
+#         data_source
+#         .filter(lambda vehicle: vehicle.get_fields_by_names(["delay"])[0] > 0)
+#         .key_by(lambda vehicle: vehicle.get_fields_by_names(["id"])[0])
+#         .process(ReduceDelayProcessFunction(program))
+#         .filter(filter_out_none)
+#     )
+#
+#     # SINK
+#     sink = get_sink(program, "task3")
+#     improved_delay_vehicles.sink_to(sink)
+#
+#     def formatted(record: dict):
+#         as_dict = record
+#         return (
+#             f"ID: {as_dict['id']:>6} | "
+#             f"Improvement: {as_dict['improvement']:>10.2f} | "
+#             f"Previous Delay: {as_dict['previous_delay']:>10.2f} | "
+#             f"Current Delay: {as_dict['current_delay']:>10.2f}"
+#         )
+#
+#     # PRINT
+#     formatted_results = improved_delay_vehicles.map(formatted, output_type=Types.STRING())
+#     formatted_results.print()
+#
+#     return improved_delay_vehicles
 
 
 class MinMaxDelayAggregateFunction(AggregateFunction):
@@ -481,13 +531,6 @@ class MinMaxDelayAggregateFunction(AggregateFunction):
         return min(acc1[0], acc2[0]), max(acc1[1], acc2[1])
 
 
-class MyTimestampAssigner(TimestampAssigner):
-    def extract_timestamp(self, value, record_timestamp):
-        timestamp = value.get_fields_by_names(["lastupdate"])[0]
-        # print("timestamp", timestamp)
-        return timestamp
-
-
 class MinMaxDelayWindowFunction(ProcessWindowFunction):
     """
     Adds the window's start and end time to the min/max delay results.
@@ -509,16 +552,15 @@ def task_4(data_source: DataStream, program: Program) -> DataStream:
     """
     program.logger.debug("Processing setup for: 'Task 4' - Calculating min/max delay in the last 3 minutes.")
 
-    # Assign timestamps and watermarks for event-time processing
-    delayed_vehicles = data_source.filter(lambda vehicle: vehicle.get_fields_by_names(["delay"])[0] > 0)
-
     watermark_strategy = WatermarkStrategy.for_bounded_out_of_orderness(
         Duration.of_seconds(10)
     ).with_timestamp_assigner(MyTimestampAssigner())
-    delayed_vehicles_with_timestamps = delayed_vehicles.assign_timestamps_and_watermarks(watermark_strategy)
 
     min_max_delays = (
-        delayed_vehicles_with_timestamps.key_by(lambda vehicle: vehicle.get_fields_by_names(["id"])[0])
+        data_source
+        .filter(lambda vehicle: vehicle.get_fields_by_names(["delay"])[0] > 0)
+        .assign_timestamps_and_watermarks(watermark_strategy)
+        .key_by(lambda vehicle: vehicle.get_fields_by_names(["id"])[0])
         .window(SlidingProcessingTimeWindows.of(Time.seconds(3 * 60), Time.seconds(5)))
         .aggregate(
             MinMaxDelayAggregateFunction(),
