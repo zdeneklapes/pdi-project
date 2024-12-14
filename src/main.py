@@ -112,8 +112,8 @@ def parseArgs() -> dict:
         "--log",
         nargs="+",
         default=[
-            # 'DEBUG',
-            # 'INFO',
+            'DEBUG',
+            'INFO',
             "WARNING",
             "ERROR",
             "CRITICAL",
@@ -153,5 +153,4 @@ if __name__ == "__main__":
         else:
             raise ValueError(f"Invalid mode: {program.args['mode']}")
     except Exception as e:
-        program.logger.warning(f"Warn in main process: {e}")
-        exit(1)
+        raise e from e

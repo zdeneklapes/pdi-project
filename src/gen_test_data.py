@@ -25,7 +25,7 @@ def setup_environment():
 
 def create_data(test_data: list, output_dir: Path):
     if output_dir.exists():
-        answer = input(f"Directory {output_dir} already exists. Do you want to delete it? [y/N] ")
+        answer = input(f"Directory {output_dir} already exists. Do you want to delete it? Generated will be {len(test_data)} files (records). [y/n]: ")
         if answer.lower() == "y":
             print(f"Removing directory {output_dir}")
             os.system(f"rm -rf {output_dir}")
@@ -36,7 +36,9 @@ def create_data(test_data: list, output_dir: Path):
     for idx, record in enumerate(test_data):
         filename = datetime.datetime.now().strftime("%Y_%m_%d_%H-%M-%S-%f")
         file_path = Path(output_dir) / f"{filename}.json"
-        print(f"Writing test data to {file_path}")
+        _lastupdate = datetime.datetime.fromtimestamp(record['attributes']['lastupdate'] / 1000).strftime("%Y-%m-%d %H:%M:%S")
+        # _lastupdate = record['attributes']['lastupdate']
+        print(f"Writing test data to {file_path} - with lastupdate: {_lastupdate}")
         with open(file_path, "w") as f:
             json.dump(record, f)
 
@@ -45,37 +47,56 @@ def test_data_task_1(setup_environment):
     """Create deterministic mock data for testing all tasks."""
     # Set a fixed random seed for reproducibility
     random.seed(42)
-    test_data = []
-    for i in range(10):
-        record = {
+    test_data = [
+        *[{
             "geometry": {
                 "spatialReference": {"wkid": 4326},
-                "x": round(random.uniform(16.5, 16.8), 6),
-                "y": round(random.uniform(49.1, 49.3), 6),
+                "x": 16.605555,
+                "y": 49.192222,
             },
             "attributes": {
-                "id": str(random.randint(1000, 1003)),
-                "vtype": random.randint(0, 5),
-                "ltype": random.randint(0, 5),
-                "bearing": round(random.uniform(-1.0, 360.0), 1),
-                "lineid": random.randint(1, 200),
-                "linename": f"Line_{random.randint(1, 200)}",
-                "routeid": random.randint(1, 5000),
-                "course": str(random.randint(10000, 99999)),
-                "lf": random.choice(["true", "false"]),
-                "delay": round(random.uniform(0, 300), 1),
-                "laststopid": random.randint(1000, 1005),
-                "finalstopid": random.randint(1000, 1005),
+                "id": str(1000),
+                "vtype": 2,
+                "ltype": 1,
+                "bearing": 90.0,
+                "lineid": 91,
+                "linename": "Trolley_91",
+                "routeid": 101,
+                "course": "12345",
+                "lf": "true",
+                "delay": 2.0,
+                "laststopid": 2001,
+                "finalstopid": 2001,
                 "isinactive": "false",
-                "lastupdate": random.randint(1700000000000, 1734046845201),
-                "globalid": f"{{{''.join(random.choices('ABCDEF1234567890', k=8))}-"
-                            f"{''.join(random.choices('ABCDEF1234567890', k=4))}-"
-                            f"{''.join(random.choices('ABCDEF1234567890', k=4))}-"
-                            f"{''.join(random.choices('ABCDEF1234567890', k=4))}-"
-                            f"{''.join(random.choices('ABCDEF1234567890', k=12))}}}",
+                "lastupdate": 1734000000000 + (i * 5 * 1000),
+                "globalid": "{A1B2C3D4-E5F6-7890-1234-56789ABCDEF0}",
             },
-        }
-        test_data.append(record)
+        } for i in range(5)],
+        *[{
+            "geometry": {
+                "spatialReference": {"wkid": 4326},
+                "x": 16.620000,
+                "y": 49.200000,
+            },
+            "attributes": {
+                "id": str(1001),
+                "vtype": 2,
+                "ltype": 1,
+                "bearing": 180.0,
+                "lineid": 92,
+                "linename": "Trolley_92",
+                "routeid": 102,
+                "course": "54321",
+                "lf": "true",
+                "delay": 0.0,
+                "laststopid": 2002,
+                "finalstopid": 2002,
+                "isinactive": "false",
+                "lastupdate": 1734000000000 + (i * 5 * 1000),
+                "globalid": "{F0E1D2C3-B4A5-6789-1234-ABCDEF123456}",
+            },
+        } for i in range(5)],
+    ]
 
     # Save test data to JSON files
     create_data(test_data, setup_environment["data_dir"] / "1")
@@ -100,76 +121,53 @@ def test_data_task_2(setup_environment):
                 "course": "12345",
                 "lf": "true",
                 "delay": 2.0,
-                "laststopid": 2001,
-                "finalstopid": 2001,
+                "laststopid": 999,
+                "finalstopid": 1000,
                 "isinactive": "false",
                 "lastupdate": 1734046845000,
                 "globalid": "{A1B2C3D4-E5F6-7890-1234-56789ABCDEF0}",
             },
         },
-        {
+        *[{
             "geometry": {
                 "spatialReference": {"wkid": 4326},
-                "x": 16.620000,
-                "y": 49.200000,
+                "x": 16.605555,
+                "y": 49.192222,
             },
             "attributes": {
-                "id": "1002",
+                "id": "1001",
                 "vtype": 2,
                 "ltype": 1,
-                "bearing": 180.0,
-                "lineid": 92,
-                "linename": "Trolley_92",
-                "routeid": 102,
-                "course": "54321",
+                "bearing": 90.0,
+                "lineid": 91,
+                "linename": "Trolley_91",
+                "routeid": 101,
+                "course": "12345",
                 "lf": "true",
-                "delay": 0.0,
-                "laststopid": 2002,
-                "finalstopid": 2002,
+                "delay": 2.0,
+                "laststopid": 2000 + i,
+                "finalstopid": 2000 + i,
                 "isinactive": "false",
-                "lastupdate": 1734046845100,
-                "globalid": "{F0E1D2C3-B4A5-6789-1234-ABCDEF123456}",
+                "lastupdate": 1734046845000,
+                "globalid": "{A1B2C3D4-E5F6-7890-1234-56789ABCDEF0}",
             },
-        },
-        {
-            "geometry": {
-                "spatialReference": {"wkid": 4326},
-                "x": 16.625000,
-                "y": 49.195000,
-            },
-            "attributes": {
-                "id": "1003",
-                "vtype": 2,
-                "ltype": 1,
-                "bearing": 270.0,
-                "lineid": 93,
-                "linename": "Trolley_93",
-                "routeid": 103,
-                "course": "67890",
-                "lf": "true",
-                "delay": 5.0,
-                "laststopid": 2003,
-                "finalstopid": 2003,
-                "isinactive": "false",
-                "lastupdate": 1734046845200,
-                "globalid": "{1A2B3C4D-5E6F-7890-1234-DEF012345678}",
-            },
-        },
+        } for i in range(3)],
     ]
     create_data(static_data, setup_environment['data_dir'] / "2")
 
 
 def test_data_task_3(setup_environment):
+    count_data = 4
     # Define static data for vehicles with delays
     static_data = [
-        {
+        *[{
             "geometry": {
                 "spatialReference": {"wkid": 4326},
                 "x": 16.602111,
                 "y": 49.194444,
             },
             "attributes": {
-                "id": "2998",
+                "id": str(2000 + i),
                 "vtype": 3,
                 "ltype": 2,
                 "bearing": 120.0,
@@ -185,31 +183,7 @@ def test_data_task_3(setup_environment):
                 "lastupdate": 1734040000100,
                 "globalid": "{AA1BB2CC3-DD4EE5-FF67890-11234567890A}",
             },
-        },
-        {
-            "geometry": {
-                "spatialReference": {"wkid": 4326},
-                "x": 16.602111,
-                "y": 49.194444,
-            },
-            "attributes": {
-                "id": "2999",
-                "vtype": 3,
-                "ltype": 2,
-                "bearing": 120.0,
-                "lineid": 101,
-                "linename": "Line_101",
-                "routeid": 201,
-                "course": "11223",
-                "lf": "true",
-                "delay": 0,
-                "laststopid": 3011,
-                "finalstopid": 3021,
-                "isinactive": "false",
-                "lastupdate": 1734040000200,
-                "globalid": "{AA1BB2CC3-DD4EE5-FF67890-11234567890A}",
-            },
-        },
+        } for i in range(2)],
         *[
             {
                 "geometry": {
@@ -231,10 +205,10 @@ def test_data_task_3(setup_environment):
                     "laststopid": 3011,
                     "finalstopid": 3021,
                     "isinactive": "false",
-                    "lastupdate": int(f"1734040000{i}00"),
+                    "lastupdate": 1734040000000 + (i * 5 * 1000),
                     "globalid": "{AA1BB2CC3-DD4EE5-FF67890-11234567890A}",
                 },
-            } for i in range(3)
+            } for i in range(count_data)
         ],
         *[{
             "geometry": {
@@ -256,10 +230,10 @@ def test_data_task_3(setup_environment):
                 "laststopid": 3012,
                 "finalstopid": 3022,
                 "isinactive": "false",
-                "lastupdate": int(f"1734040000{i}00"),
+                "lastupdate": 1734040000000 + (i * 5 * 1000),
                 "globalid": "{BB2CC3DD4-EE5FF6-7890112-34567890AABB}",
             },
-        } for i in range(3)],
+        } for i in range(count_data)],
         *[{
             "geometry": {
                 "spatialReference": {"wkid": 4326},
@@ -280,12 +254,42 @@ def test_data_task_3(setup_environment):
                 "laststopid": 3013,
                 "finalstopid": 3023,
                 "isinactive": "false",
-                "lastupdate": int(f"1734040000{i}00"),
+                "lastupdate": 1734040000000 + (i * 5 * 1000),
                 "globalid": "{CC3DD4EE5-FF6789-0112345-67890AABBCD3}",
             },
-        } for i in range(3)]
+        } for i in range(count_data)]
     ]
     create_data(static_data, setup_environment['data_dir'] / "3")
+
+
+def test_data_task_4(setup_environment):
+    static_data = [
+        *[{
+            "geometry": {
+                "spatialReference": {"wkid": 4326},
+                "x": 16.640000,
+                "y": 49.220000,
+            },
+            "attributes": {
+                "id": f"100{i}",
+                "vtype": 3,
+                "ltype": 2,
+                "bearing": 45.0,
+                "lineid": 95,
+                "linename": "Line_95",
+                "routeid": 105,
+                "course": "11234",
+                "lf": "false",
+                "delay": 10.0,
+                "laststopid": 2009,
+                "finalstopid": 2010,
+                "isinactive": "false",
+                "lastupdate": 1734040000000 + (i * 60 * 1000),
+                "globalid": "{3C4D5E6F-7G8H-9012-3456-7890ABCDEFAB}",
+            },
+        } for i in range(9)],
+    ]
+    create_data(static_data, setup_environment['data_dir'] / "4")
 
 
 if __name__ == "__main__":
@@ -298,6 +302,8 @@ if __name__ == "__main__":
         test_data_task_2(setup_environment())
     elif args["task"] == 3:
         test_data_task_3(setup_environment())
+    elif args["task"] == 4:
+        test_data_task_4(setup_environment())
     else:
         print("Please provide a valid task number.")
         exit(1)

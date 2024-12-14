@@ -80,6 +80,6 @@ Installation according to [INSTALL.md](INSTALL.md) and testing according to [TES
 
 - Implementation of the application.
 - Documentation:
-    - `README.md` (sources and licenses).
-    - `INSTALL.md` (setup and deployment).
-    - `TESTING.md` (tests and expected results).
+    - `README.md` (sources and licenses) [here](README.md).
+    - `INSTALL.md` (setup and deployment) [here](INSTALL.md).
+  - `TESTING.md` (tests and expected results) [here](TESTING.md).
