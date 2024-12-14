@@ -24,7 +24,7 @@ make run
 make install
 
 # Go to virtual environment
-source venv/bin/activate.fish
+source .venv/bin/activate.fish
 ```
 
 ## Running the project the EASY WAY

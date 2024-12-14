@@ -56,8 +56,8 @@ def test_data_task_1(setup_environment):
             },
             "attributes": {
                 "id": str(1000),
-                "vtype": 2,
-                "ltype": 1,
+                "vtype": i,
+                "ltype": i,
                 "bearing": 90.0,
                 "lineid": 91,
                 "linename": "Trolley_91",
@@ -80,8 +80,8 @@ def test_data_task_1(setup_environment):
             },
             "attributes": {
                 "id": str(1001),
-                "vtype": 2,
-                "ltype": 1,
+                "vtype": i,
+                "ltype": i,
                 "bearing": 180.0,
                 "lineid": 92,
                 "linename": "Trolley_92",
@@ -136,8 +136,8 @@ def test_data_task_2(setup_environment):
             },
             "attributes": {
                 "id": "1001",
-                "vtype": 2,
-                "ltype": 1,
+                "vtype": i,
+                "ltype": i,
                 "bearing": 90.0,
                 "lineid": 91,
                 "linename": "Trolley_91",

@@ -856,7 +856,7 @@ class MyTask:
             return (
                 f"window start: {record['window_start']} | "
                 f"window end: {record['window_end']} | "
-                f"elements: {record['elements_len']} | "
+                f"elements: {record['elements_len']:>4} | "
                 f"min delay: {float(record['min_delay']):>5.2f} | "
                 f"max delay: {float(record['max_delay']):>5.2f} | "
             )
@@ -893,8 +893,8 @@ class MyTask:
                 f"ID: {record['id']:>6} | "
                 f"From: {datetime.fromtimestamp(record['datetime_from'] / 1000).strftime('%Y-%m-%d %H:%M:%S')} | "
                 f"To: {datetime.fromtimestamp(record['datetime_to'] / 1000).strftime('%Y-%m-%d %H:%M:%S')} | "
-                f"Min Interval: {record['min_interval'] / 1000:>5.2f} s | "
-                f"Max Interval: {record['max_interval'] / 1000:>5.2f} s"
+                f"Min Interval: {record['min_interval'] / 1000:>5.2f}s | "
+                f"Max Interval: {record['max_interval'] / 1000:>5.2f}s"
             )
 
         # PRINT
