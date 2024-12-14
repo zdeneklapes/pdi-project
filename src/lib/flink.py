@@ -245,6 +245,7 @@ class MyFunction:
                 if len(self.vehicle_buffer[vehicle_id]) == CUSTOM_WINDOW_SIZE:
                     # take all record where are at least 2 records
                     assert all([isinstance(x, Row) for x in self.vehicle_buffer[vehicle_id]]), "All elements should be Row"
+
                     def get_key(x):
                         return x.get_fields_by_names(["lastupdate"])[0]
 
@@ -309,10 +310,8 @@ class MyFunction:
 
                     # print("=========================================================")
 
-
                     for record in sorted_results:
                         # print("record", record)
-                        # yield record
                         yield Row(
                             id=record["id"],
                             improvement=record["improvement"],
@@ -435,34 +434,54 @@ class MyFunction:
             """
             if self.history.value() is None:
                 self.history.update([value])
+            else:
+                self.history.update(self.history.value() + [value])
 
-            history = self.history.value()
+            CUSTOM_WINDOW_SIZE = 10
 
-            if len(history) == 10:
+            RECORD_TO_COUNT = 10
+
+            if len(self.history.value()) == CUSTOM_WINDOW_SIZE:
+                # print("=========== Before sort ===========")
+                # pprint([{
+                #     "id": vehicle.get_fields_by_names(["id"])[0],
+                #     "lastupdate": datetime.fromtimestamp(vehicle.get_fields_by_names(["lastupdate"])[0] / 1000).strftime('%Y-%m-%d %H:%M:%S'),
+                # } for vehicle in self.history.value()])
+
+                # print("len(self.history.value())", len(self.history.value()))
                 min_interval = float("inf")
                 max_interval = float("-inf")
-                for i in range(1, len(history)):
-                    interval = (
-                            history[i].get_fields_by_names(["lastupdate"])[0]
-                            - history[i - 1].get_fields_by_names(["lastupdate"])[0]
+
+                # sort by lastupdate
+                self.history.value().sort(key=lambda x: x.get_fields_by_names(["lastupdate"])[0])
+
+                # print("=========== After sort ===========")
+                # pprint([{
+                #     "id": vehicle.get_fields_by_names(["id"])[0],
+                #     "lastupdate": datetime.fromtimestamp(vehicle.get_fields_by_names(["lastupdate"])[0] / 1000).strftime('%Y-%m-%d %H:%M:%S'),
+                # } for vehicle in self.history.value()])
+
+                first_10_records = self.history.value()[:RECORD_TO_COUNT]
+
+                for i in range(1, len(first_10_records)):
+                    interval = abs(
+                            self.history.value()[i - 1].get_fields_by_names(["lastupdate"])[0]
+                            -
+                            self.history.value()[i].get_fields_by_names(["lastupdate"])[0]
                     )
                     min_interval = min(min_interval, interval)
                     max_interval = max(max_interval, interval)
-                history.pop(0)
-                self.history.update(history)
+                self.history.value().pop(0)
+                # print("len(self.history.value())", len(self.history.value()))
                 yield {
                     "id": value.get_fields_by_names(["id"])[0],
-                    "datetime_from": history[0].get_fields_by_names(["lastupdate"])[0],
+                    "datetime_from": self.history.value()[0].get_fields_by_names(["lastupdate"])[0],
                     "datetime_to": value.get_fields_by_names(["lastupdate"])[0],
                     "min_interval": min_interval,
                     "max_interval": max_interval,
                 }
-            elif len(history) < 10:
-                history.append(value)
-                self.history.update(history)
-                yield None
             else:
-                assert False, "Should not reach here"
+                yield None
 
 
 class MyTask:
@@ -746,110 +765,6 @@ class MyTask:
         # Print formatted results
         processed_data.map(format_result, output_type=Types.STRING()).print()
 
-    # class ReduceDelayProcessFunction(FlatMapFunction):
-    #     """
-    #     Tracks delay improvement for vehicles, buffers records for sorting,
-    #     and emits the sorted results after processing a batch.
-    #     """
-    #     vehicles_buffer = defaultdict(list)  # Buffers processed records
-    #
-    #     def _get_improvement(self, prev_record, new_record):
-    #         """
-    #         Calculates the delay improvement between two vehicle records.
-    #         """
-    #         old = prev_record.get_fields_by_names(["delay"])[0]
-    #         new = new_record.get_fields_by_names(["delay"])[0]
-    #         return old - new
-    #
-    #     def flat_map(self, value: Row):
-    #         """
-    #         Processes each vehicle record, calculates delay improvement, and buffers results.
-    #         """
-    #         vehicle_id = value.get_fields_by_names(["id"])[0]
-    #         self.vehicles_buffer[vehicle_id].append(value)
-    #         if len(self.vehicles_buffer[vehicle_id]) == 3:
-    #             # take all record where are at leats 2
-    #             records = [
-    #                 {
-    #                     "id": vehicles[0].get_fields_by_names(["id"])[0],
-    #                     "improvement": self._get_improvement(vehicles[-2], vehicles[-1]),
-    #                     "previous_delay": vehicles[-2].get_fields_by_names(["delay"])[0],
-    #                     "current_delay": vehicles[-1].get_fields_by_names(["delay"])[0],
-    #                     # "lastupdate": vehicles[-1].get_fields_by_names(["lastupdate"])[0],
-    #                 }
-    #                 for vehicles in self.vehicles_buffer.values()
-    #                 if len(vehicles) >= 2
-    #             ]
-    #
-    #             # pop the first element only if there is more than 2 elements
-    #             for vehicles in self.vehicles_buffer.values():
-    #                 if len(vehicles) >= 2:
-    #                     vehicles.pop(0)
-    #
-    #             assert all(len(vehicles) >= 1 for vehicles in self.vehicles_buffer.values()), "All vehicles should have at least 1 record here"
-    #
-    #             sorted_records = sorted(records, key=lambda x: x["improvement"], reverse=True)
-    #             # print("sorted_records", sorted_records)
-    #
-    #             for record in sorted_records:
-    #                 yield record
-    #
-    #
-    # def task_3(data_source: DataStream, program: Program):
-    #     """
-    #     Task 3: List delayed vehicles reducing delay, sorted by improvement.
-    #     """
-    #     program.logger.debug("Processing setup for: 'Task 3' - Calculating delayed vehicles reducing delay.")
-    #
-    #     # Assign timestamps and watermarks using MyTimestampAssigner
-    #     watermark_strategy = (
-    #         WatermarkStrategy
-    #         .for_bounded_out_of_orderness(Duration.of_millis(1000))
-    #         .with_timestamp_assigner(MyTimestampAssigner())
-    #     )
-    #
-    #     def filter_out_negative_improvements(record):
-    #         """
-    #         Filter out negative improment records.
-    #         """
-    #         if record["improvement"] <= 0:
-    #             return False
-    #         return True
-    #
-    #     # Process the bulk of records and sort improvements
-    #     processed_data = (
-    #         data_source
-    #         .filter(lambda vehicle: vehicle.get_fields_by_names(["delay"])[0] > 0)
-    #         .assign_timestamps_and_watermarks(watermark_strategy)
-    #         # .window_all(SlidingProcessingTimeWindows.of(Time.seconds(5), Time.seconds(1)))
-    #         # .key_by(lambda vehicle: vehicle.get_fields_by_names(["id"])[0])
-    #         .flat_map(ReduceDelayProcessFunction())
-    #         .filter(filter_out_negative_improvements)
-    #     )
-    #
-    #     # SINK
-    #     sink = get_sink(program, "task3")
-    #     processed_data.sink_to(sink)
-    #
-    #     def formatted(record: dict):
-    #         """
-    #         Format the results for logging or printing.
-    #         """
-    #         return (
-    #             f"ID: {record['id']:>6} | "
-    #             f"improvement: {record['improvement']:>10.2f} | "
-    #             f"previous Delay: {record['previous_delay']:>10.2f} | "
-    #             f"current Delay: {record['current_delay']:>10.2f} | "
-    #             # f"lastupdate: {datetime.fromtimestamp(record['lastupdate'] / 1000).strftime('%Y-%m-%d %H:%M:%S')}"
-    #         )
-    #
-    #     # PRINT
-    #     _ = (
-    #         processed_data
-    #         .map(formatted, output_type=Types.STRING())
-    #         .print()
-    #     )
-
     @staticmethod
     def task_4(data_source: DataStream, program: Program):
         """
@@ -926,8 +841,8 @@ class MyTask:
                 f"ID: {record['id']:>6} | "
                 f"From: {datetime.fromtimestamp(record['datetime_from'] / 1000).strftime('%Y-%m-%d %H:%M:%S')} | "
                 f"To: {datetime.fromtimestamp(record['datetime_to'] / 1000).strftime('%Y-%m-%d %H:%M:%S')} | "
-                f"Min Interval: {record['min_interval']:>13.2f} ms | "
-                f"Max Interval: {record['max_interval']:>13.2f} ms"
+                f"Min Interval: {record['min_interval'] / 1000:>5.2f} s | "
+                f"Max Interval: {record['max_interval'] / 1000:>5.2f} s"
             )
 
         # PRINT

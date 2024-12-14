@@ -271,7 +271,7 @@ def test_data_task_4(setup_environment):
                 "y": 49.220000,
             },
             "attributes": {
-                "id": f"100{i}",
+                "id": str(1000+i),
                 "vtype": 3,
                 "ltype": 2,
                 "bearing": 45.0,
@@ -291,6 +291,97 @@ def test_data_task_4(setup_environment):
     ]
     create_data(static_data, setup_environment['data_dir'] / "4")
 
+def test_data_task_5(setup_environment):
+    """
+    Generate deterministic mock data for testing Task 5.
+    Task 5 involves calculating the min/max interval of the last 10 updates.
+    """
+    COUNT_DATA = 10
+    static_data = [
+        *[
+            {
+                "geometry": {
+                    "spatialReference": {"wkid": 4326},
+                    "x": 16.605555 + (i * 0.0001),  # Simulating slight movement
+                    "y": 49.192222 + (i * 0.0001),
+                },
+                "attributes": {
+                    "id": "5001",
+                    "vtype": 3,
+                    "ltype": 2,
+                    "bearing": 90.0,
+                    "lineid": 101,
+                    "linename": "Line_101",
+                    "routeid": 201,
+                    "course": "98765",
+                    "lf": "true",
+                    "delay": random.uniform(0, 50),  # Random delay to simulate real-world variability
+                    "laststopid": 4000 + i,
+                    "finalstopid": 5000 + i,
+                    "isinactive": "false",
+                    "lastupdate": 1734040000000 + (i * 10 * 1000),  # 1-minute interval
+                    "globalid": f"{{AA1BB2CC3-DD4EE5-FF67890-11234567890A-{i}}}",
+                },
+            }
+            for i in range(COUNT_DATA)
+        ],
+        *[
+            {
+                "geometry": {
+                    "spatialReference": {"wkid": 4326},
+                    "x": 16.615555 + (i * 0.0002),  # Simulating slight movement
+                    "y": 49.199999 + (i * 0.0002),
+                },
+                "attributes": {
+                    "id": "5002",
+                    "vtype": 3,
+                    "ltype": 2,
+                    "bearing": 180.0,
+                    "lineid": 102,
+                    "linename": "Line_102",
+                    "routeid": 202,
+                    "course": "44556",
+                    "lf": "true",
+                    "delay": random.uniform(0, 50),
+                    "laststopid": 4001 + i,
+                    "finalstopid": 5001 + i,
+                    "isinactive": "false",
+                    "lastupdate": 1734040000000 + (i * 10 * 1000),
+                    "globalid": f"{{BB2CC3DD4-EE5FF6-7890112-34567890AABB-{i}}}",
+                },
+            }
+            for i in range(COUNT_DATA)
+        ],
+        *[
+            {
+                "geometry": {
+                    "spatialReference": {"wkid": 4326},
+                    "x": 16.625555 + (i * 0.0003),  # Simulating slight movement
+                    "y": 49.205555 + (i * 0.0003),
+                },
+                "attributes": {
+                    "id": "5003",
+                    "vtype": 3,
+                    "ltype": 2,
+                    "bearing": 270.0,
+                    "lineid": 103,
+                    "linename": "Line_103",
+                    "routeid": 203,
+                    "course": "77889",
+                    "lf": "true",
+                    "delay": random.uniform(0, 50),
+                    "laststopid": 4002 + i,
+                    "finalstopid": 5002 + i,
+                    "isinactive": "false",
+                    "lastupdate": 1734040000000 + (i * 10 * 1000),
+                    "globalid": f"{{CC3DD4EE5-FF6789-0112345-67890AABBCD3-{i}}}",
+                },
+            }
+            for i in range(COUNT_DATA)
+        ],
+    ]
+    create_data(static_data, setup_environment['data_dir'] / "5")
+
 
 if __name__ == "__main__":
     args = ArgumentParser()
@@ -304,6 +395,8 @@ if __name__ == "__main__":
         test_data_task_3(setup_environment())
     elif args["task"] == 4:
         test_data_task_4(setup_environment())
+    elif args["task"] == 5:
+        test_data_task_5(setup_environment())
     else:
         print("Please provide a valid task number.")
         exit(1)

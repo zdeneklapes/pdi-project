@@ -12,7 +12,13 @@ Please follow the "**Install dependencies**" section inside [INSTALL.md](INSTALL
 
 ## Test TASK 1:
 
-### Run
+### Generate test data
+
+```
+python src/gen_test_data.py --task 2
+```
+
+### Process the data
 
 ```
 python src/main.py --bounding-box -180 180 -180 180 --data_dir tmp/testing/data/1 --output_dir tmp/testing/output/ --mode batch --task 1
@@ -37,7 +43,13 @@ id:   1000 | vtype:  3 | ltype:  2 | lat: 49.2711 | lng: 16.7956 | bearing: 162.
 
 ## Test TASK 2:
 
-### Run
+### Generate test data
+
+```
+python src/gen_test_data.py --task 2
+```
+
+### Process the data
 
 ```
 python src/main.py --bounding-box -180 180 -180 180 --data_dir tmp/testing/data/2 --output_dir tmp/testing/output/ --mode batch --task 2
@@ -63,7 +75,13 @@ Despite this limitation, I believe the solution is robust and can be easily exte
 
 For the testing dataset, a window size of 4 was sufficient to produce accurate and consistent results.
 
-### Run
+### Generate test data
+
+```
+python src/gen_test_data.py --task 3
+```
+
+### Process the data
 
 ```
 python src/main.py --bounding-box -180 180 -180 180 --data_dir tmp/testing/data/3 --output_dir tmp/testing/output/ --mode batch --task 3
@@ -79,7 +97,13 @@ ID: 3001 | improvement: 1.00 | previous Delay: 20.00 | current Delay: 19.00 | la
 
 ## Test TASK 4:
 
-### Run
+### Generate test data
+
+```
+python src/gen_test_data.py --task 4
+```
+
+### Process the data
 
 ```
 python src/main.py --bounding-box -180 180 -180 180 --data_dir tmp/testing/data/4 --output_dir tmp/testing/output/ --mode batch --task 4
@@ -91,7 +115,13 @@ The order of the lines can be different, but the content should be the same, dep
 
 ## Test TASK 5:
 
-### Run
+### Generate test data
+
+```
+python src/gen_test_data.py --task 5
+```
+
+### Process the data
 
 ```
 python src/main.py --bounding-box -180 180 -180 180 --data_dir tmp/testing/data/1 --output_dir tmp/testing/output/ --mode batch --task 1
