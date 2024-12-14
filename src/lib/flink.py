@@ -234,13 +234,15 @@ class MyFunction:
             #     "lastupdate": datetime.fromtimestamp(element.get_fields_by_names(["lastupdate"])[0] / 1000).strftime('%Y-%m-%d %H:%M:%S'),
             # } for element in elements])
 
-            print(f"Processing {len(elements)} new elements")
+            # print(f"Processing {len(elements)} new elements")
+
+            CUSTOM_WINDOW_SIZE = 4
 
             for value in elements:
                 vehicle_id = value.get_fields_by_names(["id"])[0]
                 self.vehicle_buffer[vehicle_id].append(value)
 
-                if len(self.vehicle_buffer[vehicle_id]) == 3:
+                if len(self.vehicle_buffer[vehicle_id]) == CUSTOM_WINDOW_SIZE:
                     # take all record where are at least 2 records
                     assert all([isinstance(x, Row) for x in self.vehicle_buffer[vehicle_id]]), "All elements should be Row"
                     def get_key(x):
@@ -258,21 +260,21 @@ class MyFunction:
                     for vehicles in self.vehicle_buffer.values():
                         vehicles.sort(key=get_key)
 
-                    print("=========== After sort ===========")
-                    for id, elements in self.vehicle_buffer.items():
-                        pprint({f"{id}":[{
-                            "id": element.get_fields_by_names(["id"])[0],
-                            "delay": element.get_fields_by_names(["delay"])[0],
-                            "lastupdate": datetime.fromtimestamp(element.get_fields_by_names(["lastupdate"])[0] / 1000).strftime('%Y-%m-%d %H:%M:%S'),
-                        } for element in elements]})
+                    # print("=========== After sort ===========")
+                    # for id, elements in self.vehicle_buffer.items():
+                    #     pprint({f"{id}":[{
+                    #         "id": element.get_fields_by_names(["id"])[0],
+                    #         "delay": element.get_fields_by_names(["delay"])[0],
+                    #         "lastupdate": datetime.fromtimestamp(element.get_fields_by_names(["lastupdate"])[0] / 1000).strftime('%Y-%m-%d %H:%M:%S'),
+                    #     } for element in elements]})
 
                     records = [
                         {
                             "id": vehicles[0].get_fields_by_names(["id"])[0],
-                            "improvement": self._get_improvement(vehicles[-2], vehicles[-1]),
-                            "previous_delay": vehicles[-2].get_fields_by_names(["delay"])[0],
-                            "current_delay": vehicles[-1].get_fields_by_names(["delay"])[0],
-                            "lastupdate": vehicles[-1].get_fields_by_names(["lastupdate"])[0],
+                            "improvement": self._get_improvement(vehicles[0], vehicles[1]),
+                            "previous_delay": vehicles[0].get_fields_by_names(["delay"])[0],
+                            "current_delay": vehicles[1].get_fields_by_names(["delay"])[0],
+                            "lastupdate": vehicles[1].get_fields_by_names(["lastupdate"])[0],
                         }
                         for vehicles in self.vehicle_buffer.values()
                         if len(vehicles) >= 2
@@ -283,29 +285,29 @@ class MyFunction:
                         if len(vehicles) >= 2:
                             vehicles.pop(0)
 
-                    print("=========== After pop ===========")
-                    for id, elements in self.vehicle_buffer.items():
-                        pprint({f"{id}":[{
-                            "id": element.get_fields_by_names(["id"])[0],
-                            "delay": element.get_fields_by_names(["delay"])[0],
-                            "lastupdate": datetime.fromtimestamp(element.get_fields_by_names(["lastupdate"])[0] / 1000).strftime('%Y-%m-%d %H:%M:%S'),
-                        } for element in elements]})
+                    # print("=========== After pop ===========")
+                    # for id, elements in self.vehicle_buffer.items():
+                    #     pprint({f"{id}":[{
+                    #         "id": element.get_fields_by_names(["id"])[0],
+                    #         "delay": element.get_fields_by_names(["delay"])[0],
+                    #         "lastupdate": datetime.fromtimestamp(element.get_fields_by_names(["lastupdate"])[0] / 1000).strftime('%Y-%m-%d %H:%M:%S'),
+                    #     } for element in elements]})
 
                     assert all(len(vehicles) >= 1 for vehicles in self.vehicle_buffer.values()), "All vehicles should have at least 1 record here"
 
                     assert all([isinstance(x, dict) for x in records]), "All elements should be dict"
                     sorted_results = sorted(records, key=lambda x: x["improvement"], reverse=True)
 
-                    print("=========== Results ===========")
-                    pprint([{
-                        'id': record["id"],
-                        'improvement': record["improvement"],
-                        # 'previous_delay': record["previous_delay"],
-                        # 'current_delay': record["current_delay"],
-                        'lastupdate': datetime.fromtimestamp(record["lastupdate"] / 1000).strftime('%Y-%m-%d %H:%M:%S'),
-                    } for record in sorted_results])
+                    # print("=========== Results ===========")
+                    # pprint([{
+                    #     'id': record["id"],
+                    #     'improvement': record["improvement"],
+                    #     # 'previous_delay': record["previous_delay"],
+                    #     # 'current_delay': record["current_delay"],
+                    #     'lastupdate': datetime.fromtimestamp(record["lastupdate"] / 1000).strftime('%Y-%m-%d %H:%M:%S'),
+                    # } for record in sorted_results])
 
-                    print("=========================================================")
+                    # print("=========================================================")
 
 
                     for record in sorted_results:

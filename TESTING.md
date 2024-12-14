@@ -44,15 +44,24 @@ python src/main.py --bounding-box -180 180 -180 180 --data_dir tmp/testing/data/
 ```
 
 ### Expected output
+
 The order of the lines can be different, but the content should be the same, depending on the order of the data processing):
+
 ```
 id:   1002 | laststopid:  2002 | finalstopid:  2002 |
 id:   1001 | laststopid:  2001 | finalstopid:  2001 |
 id:   1003 | laststopid:  2003 | finalstopid:  2003 |
 ```
 
-
 ## Test TASK 3:
+
+This task was particularly challenging and required significant tweaking and polishing of the implementation. I implemented custom windowing logic to handle event processing. Specifically, the logic waits until at least 4 events are received from a single vehicle before processing all previous records for vehicles that have more than 2 records. During this processing, the improvement in delay is computed for each vehicle and the results are sorted in descending order of improvement.
+
+One downside of this solution is that results are not visible immediately. Instead, they are emitted only after the 4th event for any vehicle is received. This delay arises from the custom windowing logic. For example, in a streaming mode scenario where records are received every 10 seconds, the first results may appear with a delay of up to 40 seconds.
+
+Despite this limitation, I believe the solution is robust and can be easily extended to accommodate different window sizes. By modifying the constant in the code (e.g., setting it to 10 instead of 4), the window can be adjusted to process at least 10 elements per vehicle, further improving the handling of out-of-order events.
+
+For the testing dataset, a window size of 4 was sufficient to produce accurate and consistent results.
 
 ### Run
 
@@ -61,11 +70,11 @@ python src/main.py --bounding-box -180 180 -180 180 --data_dir tmp/testing/data/
 ```
 
 ### Expected output
-The order and content of the lines can be different.
+
 ```
-ID:   3003 | improvement:       6.00 | previous Delay:      20.00 | current Delay:      14.00 |
-ID:   3003 | improvement:       6.00 | previous Delay:      20.00 | current Delay:      14.00 |
-ID:   3001 | improvement:       1.00 | previous Delay:      20.00 | current Delay:      19.00 |
+ID: 3003 | improvement: 3.00 | previous Delay: 20.00 | current Delay: 17.00 | lastupdate: 2024-12-12 21:46:45
+ID: 3002 | improvement: 2.00 | previous Delay: 20.00 | current Delay: 18.00 | lastupdate: 2024-12-12 21:46:45
+ID: 3001 | improvement: 1.00 | previous Delay: 20.00 | current Delay: 19.00 | lastupdate: 2024-12-12 21:46:45
 ```
 
 ## Test TASK 4:
@@ -73,7 +82,7 @@ ID:   3001 | improvement:       1.00 | previous Delay:      20.00 | current Dela
 ### Run
 
 ```
-python src/main.py --bounding-box -180 180 -180 180 --data_dir tmp/testing/data/1 --output_dir tmp/testing/output/ --mode batch --task 1
+python src/main.py --bounding-box -180 180 -180 180 --data_dir tmp/testing/data/4 --output_dir tmp/testing/output/ --mode batch --task 4
 ```
 
 ### Expected output
