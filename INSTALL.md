@@ -27,6 +27,8 @@ make install
 source .venv/bin/activate.fish
 ```
 
+## Try first the testing examples in [TESTING.md](TESTING.md)
+
 ## Running the project the EASY WAY
 
 ### Local run inside docker
