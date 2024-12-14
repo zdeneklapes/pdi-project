@@ -280,14 +280,14 @@ def test_data_task_4(setup_environment):
                 "routeid": 105,
                 "course": "11234",
                 "lf": "false",
-                "delay": 10.0,
+                "delay": i,
                 "laststopid": 2009,
                 "finalstopid": 2010,
                 "isinactive": "false",
-                "lastupdate": 1734040000000 + (i * 60 * 1000),
+                "lastupdate": 1734040000000 + (i * 10 * 1000),
                 "globalid": "{3C4D5E6F-7G8H-9012-3456-7890ABCDEFAB}",
             },
-        } for i in range(9)],
+        } for i in range(4*6)],
     ]
     create_data(static_data, setup_environment['data_dir'] / "4")
 

@@ -111,7 +111,49 @@ python src/main.py --bounding-box -180 180 -180 180 --data_dir tmp/testing/data/
 
 ### Expected output
 
-The order of the lines can be different, but the content should be the same, depending on the order of the data processing):
+```
+window start: 2024-12-12 21:44:00 | window end: 2024-12-12 21:47:00 | elements: 1 | min delay:  1.00 | max delay:  1.00 |
+window start: 2024-12-12 21:44:10 | window end: 2024-12-12 21:47:10 | elements: 2 | min delay:  1.00 | max delay:  2.00 |
+window start: 2024-12-12 21:44:20 | window end: 2024-12-12 21:47:20 | elements: 3 | min delay:  1.00 | max delay:  3.00 |
+window start: 2024-12-12 21:44:30 | window end: 2024-12-12 21:47:30 | elements: 4 | min delay:  1.00 | max delay:  4.00 |
+window start: 2024-12-12 21:44:40 | window end: 2024-12-12 21:47:40 | elements: 5 | min delay:  1.00 | max delay:  5.00 |
+window start: 2024-12-12 21:44:50 | window end: 2024-12-12 21:47:50 | elements: 6 | min delay:  1.00 | max delay:  6.00 |
+window start: 2024-12-12 21:45:00 | window end: 2024-12-12 21:48:00 | elements: 7 | min delay:  1.00 | max delay:  7.00 |
+window start: 2024-12-12 21:45:10 | window end: 2024-12-12 21:48:10 | elements: 8 | min delay:  1.00 | max delay:  8.00 |
+window start: 2024-12-12 21:45:20 | window end: 2024-12-12 21:48:20 | elements: 9 | min delay:  1.00 | max delay:  9.00 |
+window start: 2024-12-12 21:45:30 | window end: 2024-12-12 21:48:30 | elements: 10 | min delay:  1.00 | max delay: 10.00 |
+window start: 2024-12-12 21:45:40 | window end: 2024-12-12 21:48:40 | elements: 11 | min delay:  1.00 | max delay: 11.00 |
+window start: 2024-12-12 21:45:50 | window end: 2024-12-12 21:48:50 | elements: 12 | min delay:  1.00 | max delay: 12.00 |
+window start: 2024-12-12 21:46:00 | window end: 2024-12-12 21:49:00 | elements: 13 | min delay:  1.00 | max delay: 13.00 |
+window start: 2024-12-12 21:46:10 | window end: 2024-12-12 21:49:10 | elements: 14 | min delay:  1.00 | max delay: 14.00 |
+window start: 2024-12-12 21:46:20 | window end: 2024-12-12 21:49:20 | elements: 15 | min delay:  1.00 | max delay: 15.00 |
+window start: 2024-12-12 21:46:30 | window end: 2024-12-12 21:49:30 | elements: 16 | min delay:  1.00 | max delay: 16.00 |
+window start: 2024-12-12 21:46:40 | window end: 2024-12-12 21:49:40 | elements: 17 | min delay:  1.00 | max delay: 17.00 |
+window start: 2024-12-12 21:46:50 | window end: 2024-12-12 21:49:50 | elements: 18 | min delay:  1.00 | max delay: 18.00 |
+window start: 2024-12-12 21:47:00 | window end: 2024-12-12 21:50:00 | elements: 18 | min delay:  2.00 | max delay: 19.00 |
+window start: 2024-12-12 21:47:10 | window end: 2024-12-12 21:50:10 | elements: 18 | min delay:  3.00 | max delay: 20.00 |
+window start: 2024-12-12 21:47:20 | window end: 2024-12-12 21:50:20 | elements: 18 | min delay:  4.00 | max delay: 21.00 |
+window start: 2024-12-12 21:47:30 | window end: 2024-12-12 21:50:30 | elements: 18 | min delay:  5.00 | max delay: 22.00 |
+window start: 2024-12-12 21:47:40 | window end: 2024-12-12 21:50:40 | elements: 18 | min delay:  6.00 | max delay: 23.00 |
+window start: 2024-12-12 21:47:50 | window end: 2024-12-12 21:50:50 | elements: 17 | min delay:  7.00 | max delay: 23.00 |
+window start: 2024-12-12 21:48:00 | window end: 2024-12-12 21:51:00 | elements: 16 | min delay:  8.00 | max delay: 23.00 |
+window start: 2024-12-12 21:48:10 | window end: 2024-12-12 21:51:10 | elements: 15 | min delay:  9.00 | max delay: 23.00 |
+window start: 2024-12-12 21:48:20 | window end: 2024-12-12 21:51:20 | elements: 14 | min delay: 10.00 | max delay: 23.00 |
+window start: 2024-12-12 21:48:30 | window end: 2024-12-12 21:51:30 | elements: 13 | min delay: 11.00 | max delay: 23.00 |
+window start: 2024-12-12 21:48:40 | window end: 2024-12-12 21:51:40 | elements: 12 | min delay: 12.00 | max delay: 23.00 |
+window start: 2024-12-12 21:48:50 | window end: 2024-12-12 21:51:50 | elements: 11 | min delay: 13.00 | max delay: 23.00 |
+window start: 2024-12-12 21:49:00 | window end: 2024-12-12 21:52:00 | elements: 10 | min delay: 14.00 | max delay: 23.00 |
+window start: 2024-12-12 21:49:10 | window end: 2024-12-12 21:52:10 | elements: 9 | min delay: 15.00 | max delay: 23.00 |
+window start: 2024-12-12 21:49:20 | window end: 2024-12-12 21:52:20 | elements: 8 | min delay: 16.00 | max delay: 23.00 |
+window start: 2024-12-12 21:49:30 | window end: 2024-12-12 21:52:30 | elements: 7 | min delay: 17.00 | max delay: 23.00 |
+window start: 2024-12-12 21:49:40 | window end: 2024-12-12 21:52:40 | elements: 6 | min delay: 18.00 | max delay: 23.00 |
+window start: 2024-12-12 21:49:50 | window end: 2024-12-12 21:52:50 | elements: 5 | min delay: 19.00 | max delay: 23.00 |
+window start: 2024-12-12 21:50:00 | window end: 2024-12-12 21:53:00 | elements: 4 | min delay: 20.00 | max delay: 23.00 |
+window start: 2024-12-12 21:50:10 | window end: 2024-12-12 21:53:10 | elements: 3 | min delay: 21.00 | max delay: 23.00 |
+window start: 2024-12-12 21:50:20 | window end: 2024-12-12 21:53:20 | elements: 2 | min delay: 22.00 | max delay: 23.00 |
+window start: 2024-12-12 21:50:30 | window end: 2024-12-12 21:53:30 | elements: 1 | min delay: 23.00 | max delay: 23.00 |
+```
+
 
 ## Test TASK 5:
 
@@ -131,6 +173,11 @@ python src/main.py --bounding-box -180 180 -180 180 --data_dir tmp/testing/data/
 
 The order of the lines can be different, but the content should be the same, depending on the order of the data processing):
 
+```
+ID:   5003 | From: 2024-12-12 21:46:50 | To: 2024-12-12 21:47:30 | Min Interval: 10.00 s | Max Interval: 10.00 s
+ID:   5002 | From: 2024-12-12 21:46:50 | To: 2024-12-12 21:47:10 | Min Interval: 10.00 s | Max Interval: 10.00 s
+ID:   5001 | From: 2024-12-12 21:46:50 | To: 2024-12-12 21:46:40 | Min Interval: 10.00 s | Max Interval: 10.00 s
+```
 
 
 

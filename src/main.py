@@ -112,8 +112,8 @@ def parseArgs() -> dict:
         "--log",
         nargs="+",
         default=[
-            'DEBUG',
-            'INFO',
+            # 'DEBUG',
+            # 'INFO',
             "WARNING",
             "ERROR",
             "CRITICAL",

@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import datetime
 from enum import Enum
 from pprint import pprint
-from typing import Tuple, List
+from typing import Tuple, List, Iterable
 
 from pyflink.common import Duration, Types
 from pyflink.common import Encoder
@@ -21,10 +21,10 @@ from pyflink.datastream import (
 )
 from pyflink.datastream.connectors.file_system import FileSink, OutputFileConfig, RollingPolicy
 from pyflink.datastream.connectors.file_system import FileSource, StreamFormat
-from pyflink.datastream.functions import AggregateFunction, ProcessWindowFunction, ProcessAllWindowFunction
+from pyflink.datastream.functions import ProcessAllWindowFunction, IN, OUT
 from pyflink.datastream.functions import RuntimeContext
 from pyflink.datastream.state import ValueStateDescriptor
-from pyflink.datastream.window import SlidingProcessingTimeWindows, TumblingEventTimeWindows
+from pyflink.datastream.window import TumblingEventTimeWindows, SlidingEventTimeWindows
 
 from lib.program import Program
 
@@ -320,55 +320,109 @@ class MyFunction:
                             lastupdate=record["lastupdate"],
                         )
 
-    class MinMaxDelayAggregateFunction(AggregateFunction):
-        """
-        Custom aggregate function to calculate the minimum and maximum delay.
-        """
+    # class MinMaxDelayAggregateFunction(AggregateFunction):
+    #     """
+    #     Custom aggregate function to calculate the minimum and maximum delay.
+    #     """
+    #
+    #     def __init__(self):
+    #         self.counter = 0
+    #
+    #     def create_accumulator(self):
+    #         """
+    #         Initializes an accumulator as a tuple of (min_delay, max_delay).
+    #         """
+    #         print("create_accumulator")
+    #         return float("inf"), float("-inf")
+    #
+    #     def add(self, value, accumulator):
+    #         """
+    #         Updates the accumulator with the delay from the current value.
+    #         """
+    #         self.counter += 1
+    #         print(f"\rProcessing record {self.counter}", end="")
+    #         delay = value.get_fields_by_names(["delay"])[0]
+    #         min_delay, max_delay = accumulator
+    #         return min(min_delay, delay), max(max_delay, delay)
+    #
+    #     def get_result(self, accumulator):
+    #         """
+    #         Returns the final min and max delay from the accumulator.
+    #         """
+    #         print("get_result")
+    #         return accumulator
+    #
+    #     def merge(self, acc1, acc2):
+    #         """
+    #         Merges two accumulators.
+    #         """
+    #         print("merge")
+    #         return min(acc1[0], acc2[0]), max(acc1[1], acc2[1])
+    #
+    # class MinMaxDelayWindowFunction(ProcessWindowFunction):
+    #     """
+    #     Adds the window's start and end time to the min/max delay results.
+    #     """
+    #
+    #     def process(self, key: str, context: ProcessWindowFunction.Context, averages):
+    #         """
+    #         Process the window and yield the min and max delay along with the window's time range.
+    #         """
+    #         min_delay, max_delay = next(iter(averages))
+    #         window_start = datetime.fromtimestamp(context.window().start / 1000).strftime("%Y-%m-%d %H:%M:%S")
+    #         window_end = datetime.fromtimestamp(context.window().end / 1000).strftime("%Y-%m-%d %H:%M:%S")
+    #         yield {
+    #             "min_delay": min_delay,
+    #             "max_delay": max_delay,
+    #             "window_start": window_start,
+    #             "window_end": window_end,
+    #         }
 
-        def create_accumulator(self):
-            """
-            Initializes an accumulator as a tuple of (min_delay, max_delay).
-            """
-            return float("inf"), float("-inf")
-
-        def add(self, value, accumulator):
-            """
-            Updates the accumulator with the delay from the current value.
-            """
-            delay = value.get_fields_by_names(["delay"])[0]
-            min_delay, max_delay = accumulator
-            return min(min_delay, delay), max(max_delay, delay)
-
-        def get_result(self, accumulator):
-            """
-            Returns the final min and max delay from the accumulator.
-            """
-            return accumulator
-
-        def merge(self, acc1, acc2):
-            """
-            Merges two accumulators.
-            """
-            return min(acc1[0], acc2[0]), max(acc1[1], acc2[1])
-
-    class MinMaxDelayWindowFunction(ProcessWindowFunction):
+    class MinMaxDelayWindowFunction(ProcessAllWindowFunction):
         """
         Adds the window's start and end time to the min/max delay results.
         """
 
-        def process(self, key: str, context: ProcessWindowFunction.Context, averages):
+        def process(self,
+                    context: 'ProcessAllWindowFunction.Context',
+                    elements: Iterable[IN]) -> Iterable[OUT]:
             """
             Process the window and yield the min and max delay along with the window's time range.
             """
-            min_delay, max_delay = next(iter(averages))
+            min_delay = float("inf")
+            max_delay = float("-inf")
+            # super().process(context, elements)
+
+            # print(f"Processing {len(elements)} new elements")
+
+            # print windows star tand windows end based on min lastupdate and max lastupdate
+            sorted_elements = sorted(elements, key=lambda x: x.get_fields_by_names(["lastupdate"])[0])
+
+            # print("=========== After sort ===========")
+            # pprint([{
+            #     "id": element.get_fields_by_names(["id"])[0],
+            #     "lastupdate": datetime.fromtimestamp(element.get_fields_by_names(["lastupdate"])[0] / 1000).strftime('%Y-%m-%d %H:%M:%S'),
+            # } for element in sorted_elements])
+
+            # Iterate through elements to find min and max delay
+            for element in elements:
+                delay = element.get_fields_by_names(["delay"])[0]
+                min_delay = min(min_delay, delay)
+                max_delay = max(max_delay, delay)
+
+            # Format window start and end
             window_start = datetime.fromtimestamp(context.window().start / 1000).strftime("%Y-%m-%d %H:%M:%S")
             window_end = datetime.fromtimestamp(context.window().end / 1000).strftime("%Y-%m-%d %H:%M:%S")
-            yield {
-                "min_delay": min_delay,
-                "max_delay": max_delay,
-                "window_start": window_start,
-                "window_end": window_end,
-            }
+
+            result = Row(
+                window_start=window_start,
+                window_end=window_end,
+                min_delay=min_delay,
+                max_delay=max_delay,
+                elements_len=len(elements),
+            )
+            # pprint(["result", result])
+            yield result
 
     class MinMaxIntervalFunction(FlatMapFunction):
         """
@@ -465,9 +519,9 @@ class MyFunction:
 
                 for i in range(1, len(first_10_records)):
                     interval = abs(
-                            self.history.value()[i - 1].get_fields_by_names(["lastupdate"])[0]
-                            -
-                            self.history.value()[i].get_fields_by_names(["lastupdate"])[0]
+                        self.history.value()[i - 1].get_fields_by_names(["lastupdate"])[0]
+                        -
+                        self.history.value()[i].get_fields_by_names(["lastupdate"])[0]
                     )
                     min_interval = min(min_interval, interval)
                     max_interval = max(max_interval, interval)
@@ -774,22 +828,21 @@ class MyTask:
 
         # Assign watermarks for event-time processing
         watermark_strategy = WatermarkStrategy.for_bounded_out_of_orderness(
-            Duration.of_seconds(10)
+            Duration.of_seconds(20)
         ).with_timestamp_assigner(MyTimestampAssigner())
 
-        # Filter delayed vehicles and calculate min/max delays
+        output_type = Types.ROW_NAMED(
+            ["window_start", "window_end", "min_delay", "max_delay", "elements_len"],
+            [Types.STRING(), Types.STRING(), Types.FLOAT(), Types.FLOAT(), Types.INT()]
+        )
+
+        # Apply a sliding window of 3 minutes with a slide of 10 seconds
         min_max_delays = (
             data_source
             .filter(lambda vehicle: vehicle.get_fields_by_names(["delay"])[0] > 0)
             .assign_timestamps_and_watermarks(watermark_strategy)
-            .key_by(lambda vehicle: "all")  # Aggregate across all records
-            .window(SlidingProcessingTimeWindows.of(Time.minutes(3), Time.seconds(10)))
-            .aggregate(
-                MyFunction.MinMaxDelayAggregateFunction(),
-                window_function=MyFunction.MinMaxDelayWindowFunction(),
-                accumulator_type=Types.TUPLE([Types.FLOAT(), Types.FLOAT()]),
-                output_type=Types.MAP(Types.STRING(), Types.STRING()),
-            )
+            .window_all(SlidingEventTimeWindows.of(Time.minutes(3), Time.seconds(10)))
+            .process(MyFunction.MinMaxDelayWindowFunction(), output_type=output_type)
         )
 
         # Define a sink to store results
@@ -801,16 +854,15 @@ class MyTask:
             Format the results for logging or printing.
             """
             return (
-                f"Window Start: {record['window_start']} | "
-                f"Window End: {record['window_end']} | "
-                f"Min Delay: {record['min_delay']:>5.2f} | "
-                f"Max Delay: {record['max_delay']:>5.2f}"
+                f"window start: {record['window_start']} | "
+                f"window end: {record['window_end']} | "
+                f"elements: {record['elements_len']} | "
+                f"min delay: {float(record['min_delay']):>5.2f} | "
+                f"max delay: {float(record['max_delay']):>5.2f} | "
             )
 
         # Print formatted results
         min_max_delays.map(formatted, output_type=Types.STRING()).print()
-
-        program.logger.debug("Task 4 setup completed.")
 
     @staticmethod
     def task_5(data_source: DataStream, program: Program) -> DataStream:
