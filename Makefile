@@ -53,4 +53,4 @@ run-5:
 
 # ------
 pack:
-	zip xlapes02.zip -r src/**/*.py Makefile *.md pyproject.toml .python-version uv.lock
+	zip xlapes02.zip -r src/ Makefile *.md pyproject.toml .python-version uv.lock Dockerfile docker-compose.yml
